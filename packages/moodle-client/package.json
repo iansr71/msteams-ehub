@@ -2,7 +2,7 @@
   "name": "@ehub/moodle-client",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed Moodle REST client (implemented in phase 2).",
+  "description": "Typed, sanitized Moodle REST client and file downloader.",
   "type": "module",
   "exports": {
     ".": {
@@ -20,6 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ehub/shared": "workspace:*"
+    "@ehub/shared": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

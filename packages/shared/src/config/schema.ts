@@ -87,10 +87,33 @@ export const runtimeConfigShape = {
     .default(3000),
 };
 
+const boundedInteger = (min: number, max: number, fallback: number) =>
+  z.coerce
+    .number({ message: 'Must be a number.' })
+    .int({ message: 'Must be an integer.' })
+    .min(min, { message: `Must be between ${min} and ${max}.` })
+    .max(max, { message: `Must be between ${min} and ${max}.` })
+    .default(fallback);
+
+export const MOODLE_DEFAULTS = {
+  requestTimeoutMs: 30_000,
+  downloadTimeoutMs: 120_000,
+  maxDownloadBytes: 100 * 1024 * 1024,
+  maxRetries: 3,
+} as const;
+
 export const moodleConfigShape = {
   // http is tolerated for a local Moodle in development; production is enforced to https below.
   MOODLE_BASE_URL: serviceUrl({ httpsOnly: false }),
   MOODLE_TOKEN: secretString(16),
+  MOODLE_REQUEST_TIMEOUT_MS: boundedInteger(1_000, 300_000, MOODLE_DEFAULTS.requestTimeoutMs),
+  MOODLE_DOWNLOAD_TIMEOUT_MS: boundedInteger(1_000, 1_800_000, MOODLE_DEFAULTS.downloadTimeoutMs),
+  MOODLE_MAX_DOWNLOAD_BYTES: boundedInteger(
+    1_024,
+    2 * 1024 * 1024 * 1024,
+    MOODLE_DEFAULTS.maxDownloadBytes,
+  ),
+  MOODLE_MAX_RETRIES: boundedInteger(0, 10, MOODLE_DEFAULTS.maxRetries),
 };
 
 export const azureSearchConfigShape = {

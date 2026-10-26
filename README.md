@@ -4,9 +4,9 @@ A Microsoft Teams personal app that answers staff questions from Moodle E-Hub co
 Answers are grounded in indexed Moodle resources, carry validated citations, and respect each
 user's Moodle course enrolments.
 
-> **Status: phase 1 (foundation).** The repository structure, shared configuration, logging,
-> redaction and correlation utilities, and health commands exist. Moodle access, indexing,
-> retrieval, answer generation and Teams behaviour are delivered in later phases.
+> **Status: phase 2 (Moodle REST client).** Shared foundation plus a typed, sanitized Moodle
+> client and file downloader (`packages/moodle-client`). Course discovery, extraction,
+> indexing, retrieval, answer generation and Teams behaviour are delivered in later phases.
 
 ## Repository layout
 
@@ -17,7 +17,7 @@ apps/
   teams-app/      Teams personal app (phase 12)
 packages/
   shared/         Zod configuration, structured logger, redaction, correlation IDs, CLI/health helpers
-  moodle-client/  Typed Moodle REST client (phase 2)
+  moodle-client/  Typed Moodle REST client and safe file downloader
 infrastructure/
   bicep/          Azure infrastructure as code (phase 19)
 tests/
@@ -96,6 +96,10 @@ Validated with Zod in `packages/shared/src/config`. Empty values are treated as 
 | `PORT`                                  | runtime       | 1–65535; default `3000`                                |
 | `MOODLE_BASE_URL`                       | moodle        | No credentials, query or fragment; https in production |
 | `MOODLE_TOKEN`                          | moodle        | Secret                                                 |
+| `MOODLE_REQUEST_TIMEOUT_MS`             | moodle        | Optional; 1000–300000, default 30000                   |
+| `MOODLE_DOWNLOAD_TIMEOUT_MS`            | moodle        | Optional; 1000–1800000, default 120000                 |
+| `MOODLE_MAX_DOWNLOAD_BYTES`             | moodle        | Optional; 1 KiB–2 GiB, default 100 MiB                 |
+| `MOODLE_MAX_RETRIES`                    | moodle        | Optional; 0–10, default 3                              |
 | `AZURE_SEARCH_ENDPOINT`                 | azureSearch   | https                                                  |
 | `AZURE_SEARCH_INDEX_NAME`               | azureSearch   | Azure index naming rules                               |
 | `AZURE_OPENAI_ENDPOINT`                 | azureOpenAI   | https                                                  |
@@ -136,4 +140,5 @@ behaviour that depends on them is validated against real services in opt-in test
 Strict TypeScript with no `any`; Zod for all external input; interfaces and dependency injection
 around every external service; structured JSON logs with correlation IDs; no credentials or
 document contents in logs; fail closed on authentication and authorisation; Moodle content is
-untrusted data. See [`docs/decisions.md`](docs/decisions.md) for the foundation decisions.
+untrusted data. See [`docs/decisions.md`](docs/decisions.md) for the foundation decisions and
+[`docs/moodle-setup.md`](docs/moodle-setup.md) for the restricted Moodle web service.

@@ -24,6 +24,8 @@
     "indexer": "pnpm --silent --filter @ehub/indexer run cli"
   },
   "devDependencies": {
+    "@ehub/moodle-client": "workspace:*",
+    "@ehub/shared": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.19.43",
     "eslint": "^10.13.0",
