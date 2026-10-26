@@ -1,0 +1,30 @@
+{
+  "name": "@ehub/indexer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Moodle content indexer.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@ehub/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "node ../../scripts/clean.mjs dist tsconfig.build.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "cli": "tsx --conditions=@ehub/source src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "bin": {
+    "ehub-indexer": "./dist/cli.js"
+  },
+  "dependencies": {
+    "@ehub/shared": "workspace:*"
+  }
+}

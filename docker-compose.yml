@@ -1,0 +1,48 @@
+# Local development dependencies only.
+# Azure AI Search and Azure OpenAI are deliberately NOT simulated: retrieval and generation
+# behaviour must be validated against the real services (opt-in integration tests).
+# All ports bind to 127.0.0.1 so nothing is exposed to the network.
+
+name: ehub-teams-assistant
+
+services:
+  # Candidate local backing store for the sync-state repository (phase 11).
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ehub_state
+      POSTGRES_USER: ehub
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD:?Set LOCAL_POSTGRES_PASSWORD in .env}
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ehub -d ehub_state']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Azure Storage emulator for local blob/table work. Uses Microsoft's published
+  # well-known development account, which only works against the emulator.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command:
+      [
+        'azurite',
+        '--blobHost',
+        '0.0.0.0',
+        '--tableHost',
+        '0.0.0.0',
+        '--skipApiVersionCheck',
+        '--loose',
+      ]
+    ports:
+      - '127.0.0.1:10000:10000'
+      - '127.0.0.1:10002:10002'
+    volumes:
+      - azurite-data:/data
+
+volumes:
+  postgres-data:
+  azurite-data:

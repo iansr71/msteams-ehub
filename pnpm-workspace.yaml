@@ -1,0 +1,7 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Build tooling only; no dependency in this workspace needs an install script yet.
+onlyBuiltDependencies:
+  - esbuild

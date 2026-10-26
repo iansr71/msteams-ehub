@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+coverage/
+
+# Environment and secrets — only .env.example is committed
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+
+# Local state and reports
+.local/
+reports/
+*.log
+
+# Teams packages are build artefacts
+apps/teams-app/build/
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

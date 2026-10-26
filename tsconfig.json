@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared/tsconfig.build.json" },
+    { "path": "./packages/moodle-client/tsconfig.build.json" },
+    { "path": "./apps/api/tsconfig.build.json" },
+    { "path": "./apps/indexer/tsconfig.build.json" },
+    { "path": "./apps/teams-app/tsconfig.build.json" }
+  ]
+}

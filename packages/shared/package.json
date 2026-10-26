@@ -1,0 +1,25 @@
+{
+  "name": "@ehub/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared configuration, logging, redaction and correlation utilities.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@ehub/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "node ../../scripts/clean.mjs dist tsconfig.build.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}
