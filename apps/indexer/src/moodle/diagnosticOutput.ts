@@ -101,7 +101,7 @@ export function summarizeCourseStructure(structure: CourseStructure): CourseDiag
 const MAX_TEXT_LENGTH = 120;
 // C0/C1 controls (terminal escape sequences) and bidirectional overrides (spoofed text).
 // eslint-disable-next-line no-control-regex
-const UNSAFE_CHARACTERS = /[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g;
+const UNSAFE_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
 /** Makes untrusted Moodle text safe for a terminal: no control codes, one line, bounded. */
 export function sanitizeText(value: string | undefined, maxLength = MAX_TEXT_LENGTH): string {

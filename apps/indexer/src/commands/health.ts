@@ -27,6 +27,7 @@ export const INDEXER_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
     requirement: 'optional',
     missingNote: 'Not required until embeddings are implemented (phase 8).',
   },
+  { feature: 'extraction', requirement: 'optional' },
   { feature: 'observability', requirement: 'optional' },
 ];
 

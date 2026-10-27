@@ -5,3 +5,8 @@ packages:
 # Build tooling only; no dependency in this workspace needs an install script yet.
 onlyBuiltDependencies:
   - esbuild
+
+# pdfjs-dist uses @napi-rs/canvas only for rendering. Text extraction does not need it, and
+# excluding it keeps native code out of the document-parsing path.
+ignoredOptionalDependencies:
+  - '@napi-rs/canvas'

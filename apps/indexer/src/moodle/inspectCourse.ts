@@ -2,7 +2,7 @@ import type { MoodleCallOptions, MoodleClient, NormalizedMoodleBaseUrl } from '@
 
 import { isSiteCourse, mapCourse, mapCourseContents } from './courseContentsMapper.js';
 import { summarizeCourseStructure, type CourseDiagnosticSummary } from './diagnosticOutput.js';
-import type { CourseStructure } from './models.js';
+import type { CourseResource, CourseStructure } from './models.js';
 
 export class CourseNotFoundError extends Error {
   readonly code = 'course_not_found';
@@ -13,6 +13,24 @@ export class CourseNotFoundError extends Error {
     );
     this.name = 'CourseNotFoundError';
   }
+}
+
+export class ResourceNotFoundError extends Error {
+  readonly code = 'resource_not_found';
+
+  constructor(courseId: number) {
+    // The resource ID is caller-supplied text; it is not echoed back.
+    super(`The resource ID was not found in course ${String(courseId)}.`);
+    this.name = 'ResourceNotFoundError';
+  }
+}
+
+export function findCourseResource(structure: CourseStructure, resourceId: string): CourseResource {
+  const resource = structure.resources.find((candidate) => candidate.resourceId === resourceId);
+  if (resource === undefined) {
+    throw new ResourceNotFoundError(structure.course.id);
+  }
+  return resource;
 }
 
 export interface InspectCourseOptions extends MoodleCallOptions {

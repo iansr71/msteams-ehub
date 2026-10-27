@@ -4,17 +4,17 @@ A Microsoft Teams personal app that answers staff questions from Moodle E-Hub co
 Answers are grounded in indexed Moodle resources, carry validated citations, and respect each
 user's Moodle course enrolments.
 
-> **Status: phase 3 (course discovery).** Shared foundation, a typed and sanitized Moodle
-> client (`packages/moodle-client`), and indexer commands that discover courses and inspect
-> their structure (`moodle:ping`, `moodle:courses`, `moodle:inspect`). Extraction, indexing,
-> retrieval, answer generation and Teams behaviour are delivered in later phases.
+> **Status: phase 4 (extraction).** Shared foundation, a typed and sanitized Moodle client
+> (`packages/moodle-client`), course discovery (`moodle:*`), and secure text extraction for
+> PDF, Moodle Page and Book, HTML, plain text, DOCX and PPTX (`extract:test`). Chunking,
+> indexing, retrieval, answer generation and Teams behaviour are delivered in later phases.
 
 ## Repository layout
 
 ```
 apps/
   api/            Question-answering API (retrieval, RAG, auth) — health command today
-  indexer/        Moodle discovery (moodle:*), later extraction, chunking and indexing
+  indexer/        Moodle discovery (moodle:*) and extraction (extract:test); later chunking and indexing
   teams-app/      Teams personal app (phase 12)
 packages/
   shared/         Zod configuration, structured logger, redaction, correlation IDs, CLI/health helpers
@@ -48,23 +48,24 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 
 ## Commands
 
-| Command                                        | What it does                                                                             |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `pnpm build`                                   | Compiles every package to `dist/` (TypeScript project builds)                            |
-| `pnpm clean`                                   | Removes build output and coverage                                                        |
-| `pnpm format`                                  | Formats the repository with Prettier                                                     |
-| `pnpm format:check`                            | Fails if any file is not formatted                                                       |
-| `pnpm lint`                                    | ESLint (type-aware, zero warnings allowed)                                               |
-| `pnpm typecheck`                               | Strict type check of all packages and tests                                              |
-| `pnpm test`                                    | All Vitest projects (unit, integration, security)                                        |
-| `pnpm test:unit`                               | Unit tests inside `packages/*` and `apps/*`                                              |
-| `pnpm test:integration`                        | Integration tests in `tests/integration`                                                 |
-| `pnpm test:security`                           | Security regression tests in `tests/security`                                            |
-| `pnpm api health`                              | API configuration health report (JSON)                                                   |
-| `pnpm indexer health`                          | Indexer configuration health report (JSON)                                               |
-| `pnpm indexer moodle:ping`                     | Checks the Moodle connection and that the service exposes exactly the expected functions |
-| `pnpm indexer moodle:courses`                  | Lists courses; `--course-id <id[,id]>`, `--search <text>`, `--json`                      |
-| `pnpm indexer moodle:inspect --course-id <id>` | Sections, activities and file metadata for one course; `--json`                          |
+| Command                                                         | What it does                                                                             |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `pnpm build`                                                    | Compiles every package to `dist/` (TypeScript project builds)                            |
+| `pnpm clean`                                                    | Removes build output and coverage                                                        |
+| `pnpm format`                                                   | Formats the repository with Prettier                                                     |
+| `pnpm format:check`                                             | Fails if any file is not formatted                                                       |
+| `pnpm lint`                                                     | ESLint (type-aware, zero warnings allowed)                                               |
+| `pnpm typecheck`                                                | Strict type check of all packages and tests                                              |
+| `pnpm test`                                                     | All Vitest projects (unit, integration, security)                                        |
+| `pnpm test:unit`                                                | Unit tests inside `packages/*` and `apps/*`                                              |
+| `pnpm test:integration`                                         | Integration tests in `tests/integration`                                                 |
+| `pnpm test:security`                                            | Security regression tests in `tests/security`                                            |
+| `pnpm api health`                                               | API configuration health report (JSON)                                                   |
+| `pnpm indexer health`                                           | Indexer configuration health report (JSON)                                               |
+| `pnpm indexer moodle:ping`                                      | Checks the Moodle connection and that the service exposes exactly the expected functions |
+| `pnpm indexer moodle:courses`                                   | Lists courses; `--course-id <id[,id]>`, `--search <text>`, `--json`                      |
+| `pnpm indexer moodle:inspect --course-id <id>`                  | Sections, activities and file metadata for one course; `--json`                          |
+| `pnpm indexer extract:test --course-id <id> --resource-id <id>` | Downloads and extracts one resource; prints metadata, counts and a short preview         |
 
 Validation gate used before every phase is committed:
 
@@ -112,6 +113,11 @@ Validated with Zod in `packages/shared/src/config`. Empty values are treated as 
 | `AZURE_TENANT_ID`                       | azureIdentity | GUID                                                   |
 | `AZURE_CLIENT_ID`                       | azureIdentity | GUID                                                   |
 | `AZURE_CLIENT_SECRET`                   | azureIdentity | Secret, optional — local development only              |
+| `EXTRACTION_MAX_INPUT_BYTES`            | extraction    | Optional; default 50 MiB                               |
+| `EXTRACTION_MAX_TEXT_CHARS`             | extraction    | Optional; default 2,000,000                            |
+| `EXTRACTION_TIMEOUT_MS`                 | extraction    | Optional; default 60000                                |
+| `EXTRACTION_MAX_ARCHIVE_ENTRIES`        | extraction    | Optional; default 2000                                 |
+| `EXTRACTION_MAX_UNCOMPRESSED_BYTES`     | extraction    | Optional; default 200 MiB                              |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | observability | Secret, optional                                       |
 
 In production every `*_URL` / `*_ENDPOINT` variable must use https.
@@ -146,4 +152,4 @@ around every external service; structured JSON logs with correlation IDs; no cre
 document contents in logs; fail closed on authentication and authorisation; Moodle content is
 untrusted data. See [`docs/decisions.md`](docs/decisions.md) for the foundation decisions and
 [`docs/moodle-setup.md`](docs/moodle-setup.md) for the restricted Moodle web service and the
-`moodle:*` verification commands.
+`moodle:*` verification commands, and [`docs/extraction.md`](docs/extraction.md) for extraction.

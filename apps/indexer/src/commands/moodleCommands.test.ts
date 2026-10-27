@@ -40,7 +40,12 @@ async function run(
     env: options.env ?? env,
     createAccess: (settings) => {
       settingsSeen.push(settings);
-      return { client: options.client ?? fixture.client, baseUrl: fixture.baseUrl, settings };
+      return {
+        client: options.client ?? fixture.client,
+        baseUrl: fixture.baseUrl,
+        downloader: { download: () => Promise.reject(new Error('no downloads in moodle:* tests')) },
+        settings,
+      };
     },
   };
   const output: string[] = [];

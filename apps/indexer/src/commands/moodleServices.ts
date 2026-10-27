@@ -5,6 +5,7 @@ import {
   type MoodleClient,
   type MoodleClientSettings,
   type MoodleError,
+  type MoodleFileDownloader,
   type NormalizedMoodleBaseUrl,
 } from '@ehub/moodle-client';
 import {
@@ -17,12 +18,13 @@ import {
 } from '@ehub/shared';
 
 import { finalizeOutput, renderJson, sanitizeText } from '../moodle/diagnosticOutput.js';
-import { CourseNotFoundError } from '../moodle/inspectCourse.js';
+import { CourseNotFoundError, ResourceNotFoundError } from '../moodle/inspectCourse.js';
 import { UsageError } from './args.js';
 
 export interface MoodleAccess {
   readonly client: MoodleClient;
   readonly baseUrl: NormalizedMoodleBaseUrl;
+  readonly downloader: MoodleFileDownloader;
   readonly settings: MoodleClientSettings;
 }
 
@@ -34,7 +36,12 @@ export interface MoodleCommandDependencies {
 
 export function defaultCreateAccess(settings: MoodleClientSettings, logger: Logger): MoodleAccess {
   const services = createMoodleServices(settings, { logger });
-  return { client: services.client, baseUrl: services.baseUrl, settings };
+  return {
+    client: services.client,
+    baseUrl: services.baseUrl,
+    downloader: services.downloader,
+    settings,
+  };
 }
 
 /** Loads validated settings (variable names only on failure) and builds the client. */
@@ -120,11 +127,11 @@ export function describeFailure(error: unknown): FailureReport | undefined {
   if (isMoodleError(error)) {
     return fromMoodleError(error);
   }
-  if (error instanceof CourseNotFoundError) {
+  if (error instanceof CourseNotFoundError || error instanceof ResourceNotFoundError) {
     return {
       status: 'error',
       error: { category: 'not_found', code: error.code, message: error.message },
-      hint: HINTS['course_not_found'] ?? '',
+      hint: HINTS[error.code] ?? '',
     };
   }
   return undefined;

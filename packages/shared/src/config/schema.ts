@@ -134,6 +134,30 @@ export const azureIdentityConfigShape = {
   AZURE_CLIENT_SECRET: secretString(8).optional(),
 };
 
+export const EXTRACTION_DEFAULTS = {
+  maxInputBytes: 50 * 1024 * 1024,
+  maxTextChars: 2_000_000,
+  timeoutMs: 60_000,
+  maxArchiveEntries: 2_000,
+  maxUncompressedBytes: 200 * 1024 * 1024,
+} as const;
+
+export const extractionConfigShape = {
+  EXTRACTION_MAX_INPUT_BYTES: boundedInteger(
+    1_024,
+    500 * 1024 * 1024,
+    EXTRACTION_DEFAULTS.maxInputBytes,
+  ),
+  EXTRACTION_MAX_TEXT_CHARS: boundedInteger(1_000, 20_000_000, EXTRACTION_DEFAULTS.maxTextChars),
+  EXTRACTION_TIMEOUT_MS: boundedInteger(1_000, 600_000, EXTRACTION_DEFAULTS.timeoutMs),
+  EXTRACTION_MAX_ARCHIVE_ENTRIES: boundedInteger(10, 20_000, EXTRACTION_DEFAULTS.maxArchiveEntries),
+  EXTRACTION_MAX_UNCOMPRESSED_BYTES: boundedInteger(
+    1024 * 1024,
+    2 * 1024 * 1024 * 1024,
+    EXTRACTION_DEFAULTS.maxUncompressedBytes,
+  ),
+};
+
 export const observabilityConfigShape = {
   APPLICATIONINSIGHTS_CONNECTION_STRING: z
     .string()
@@ -149,6 +173,7 @@ export const moodleConfigSchema = defineConfigSchema(moodleConfigShape);
 export const azureSearchConfigSchema = defineConfigSchema(azureSearchConfigShape);
 export const azureOpenAIConfigSchema = defineConfigSchema(azureOpenAIConfigShape);
 export const azureIdentityConfigSchema = defineConfigSchema(azureIdentityConfigShape);
+export const extractionConfigSchema = defineConfigSchema(extractionConfigShape);
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
 
 const URL_KEY_PATTERN = /_(?:URL|ENDPOINT)$/;
@@ -176,6 +201,7 @@ export function defineConfigSchema<Shape extends z.ZodRawShape>(
 /** Every application variable in .env.example. */
 export const applicationConfigSchema = defineConfigSchema({
   ...moodleConfigShape,
+  ...extractionConfigShape,
   ...azureSearchConfigShape,
   ...azureOpenAIConfigShape,
   ...azureIdentityConfigShape,
@@ -187,6 +213,7 @@ export type MoodleConfig = z.output<typeof moodleConfigSchema>;
 export type AzureSearchConfig = z.output<typeof azureSearchConfigSchema>;
 export type AzureOpenAIConfig = z.output<typeof azureOpenAIConfigSchema>;
 export type AzureIdentityConfig = z.output<typeof azureIdentityConfigSchema>;
+export type ExtractionConfig = z.output<typeof extractionConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
 
@@ -197,6 +224,7 @@ export const CONFIG_FEATURES = {
   azureSearch: azureSearchConfigSchema,
   azureOpenAI: azureOpenAIConfigSchema,
   azureIdentity: azureIdentityConfigSchema,
+  extraction: extractionConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -209,5 +237,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   azureSearch: Object.keys(azureSearchConfigShape),
   azureOpenAI: Object.keys(azureOpenAIConfigShape),
   azureIdentity: Object.keys(azureIdentityConfigShape),
+  extraction: Object.keys(extractionConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

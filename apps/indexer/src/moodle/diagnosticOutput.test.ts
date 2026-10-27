@@ -21,7 +21,7 @@ afterEach(() => {
 describe('sanitizeText', () => {
   it('removes terminal escape sequences and bidi overrides', () => {
     expect(sanitizeText('Safe\u001b[31mRED\u001b[0m name')).toBe('Safe [31mRED [0m name');
-    expect(sanitizeText('abc‮gnp.exe')).toBe('abc gnp.exe');
+    expect(sanitizeText('abc\u202egnp.exe')).toBe('abc gnp.exe');
     expect(sanitizeText('line1\nline2\r\tend')).toBe('line1 line2 end');
   });
 

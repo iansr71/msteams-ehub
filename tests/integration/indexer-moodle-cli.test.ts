@@ -34,6 +34,19 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
     request.on('end', () => {
+      const url = new URL(request.url ?? '/', 'http://localhost');
+      if (request.method === 'GET' && url.pathname.startsWith('/webservice/pluginfile.php/')) {
+        if (url.searchParams.get('token') !== TOKEN) {
+          response.writeHead(403).end();
+          return;
+        }
+        const chapter = /\/mod_book\/chapter\/(\d+)\/index\.html$/.exec(url.pathname)?.[1];
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(
+          `<!DOCTYPE html><html><head><title>Chapter</title></head><body><h3>Introduction</h3><p>Chapter ${chapter ?? '?'} explains how skin analysis is recorded.</p><script>exfiltrate()</script></body></html>`,
+        );
+        return;
+      }
       const form = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
       response.setHeader('content-type', 'application/json');
       if (form.get('wstoken') !== TOKEN) {
@@ -168,6 +181,30 @@ describe('indexer moodle:* CLI over HTTP', () => {
     expect(parsed.resources[0]?.sourceUrl.startsWith(`${baseUrl}/webservice/pluginfile.php/`)).toBe(
       true,
     );
+    expectNoToken(result);
+  });
+
+  it('extract:test downloads with the token and prints only metadata and a short preview', async () => {
+    const result = await runIndexer([
+      'extract:test',
+      '--course-id',
+      '12',
+      '--resource-id',
+      '701:chapter:11',
+      '--json',
+    ]);
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      status: string;
+      resource: { resourceType: string; sourceUrl: string };
+      statistics: { blocks: number };
+      preview: { text: string };
+    };
+    expect(parsed.status).toBe('extracted');
+    expect(parsed.resource.resourceType).toBe('moodle-book-chapter');
+    expect(parsed.resource.sourceUrl).not.toContain('token');
+    expect(parsed.preview.text).toBe('Chapter 11 explains how skin analysis is recorded.');
+    expect(result.stdout).not.toContain('exfiltrate');
     expectNoToken(result);
   });
 });

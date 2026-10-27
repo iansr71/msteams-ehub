@@ -1,4 +1,5 @@
 export * from './commands/args.js';
+export * from './commands/extractCommand.js';
 export * from './commands/health.js';
 export * from './commands/index.js';
 export * from './commands/moodleCommands.js';
@@ -10,3 +11,10 @@ export * from './moodle/inspectCourse.js';
 export * from './moodle/models.js';
 export * from './moodle/pingMoodle.js';
 export * from './moodle/supportedFileTypes.js';
+export * from './extractors/contentTypeDetector.js';
+export * from './extractors/deadline.js';
+export * from './extractors/errors.js';
+export * from './extractors/extractionDiagnostics.js';
+export * from './extractors/extractorRegistry.js';
+export * from './extractors/textNormalization.js';
+export * from './extractors/types.js';
