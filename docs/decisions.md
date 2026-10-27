@@ -4,15 +4,22 @@ Short records of choices made in phase 1 that later phases depend on.
 
 ## Toolchain versions are pinned below the newest releases
 
-| Tool        | Pinned   | Newest at time of writing | Reason                                                      |
-| ----------- | -------- | ------------------------- | ----------------------------------------------------------- |
-| TypeScript  | `~6.0.3` | 7.0.x                     | `typescript-eslint` 8.x supports TypeScript `<6.1` only     |
-| Vitest      | `^4.1`   | 5.0.x                     | Vitest 5 requires Node 22.12+; the project supports Node 20 |
-| @types/node | `^20`    | 26.x                      | Type definitions match the oldest supported runtime         |
+| Tool        | Pinned   | Newest at time of writing | Reason                                                  |
+| ----------- | -------- | ------------------------- | ------------------------------------------------------- |
+| TypeScript  | `~6.0.3` | 7.0.x                     | `typescript-eslint` 8.x supports TypeScript `<6.1` only |
+| Vitest      | `^4.1`   | 5.0.x                     | Major upgrade deferred; 4.x supports Node 22            |
+| @types/node | `^22`    | 26.x                      | Type definitions match the oldest supported runtime     |
 
-Revisit when `typescript-eslint` supports TypeScript 7 and when Node 20 support can be dropped
-(Node 20 reached end of life in April 2026; moving the minimum to 22 is recommended once the
-hosting platform is chosen in phase 19).
+Revisit when `typescript-eslint` supports TypeScript 7.
+
+## Minimum Node.js is 22.13 (raised in phase 4)
+
+Phase 1 started on Node 20.19. Phase 4 raised the minimum to **22.13** because the PDF parser
+(`pdfjs-dist`) requires it from version 5 onward, and the last Node-20-compatible release
+(4.10, January 2025) no longer receives security fixes — unacceptable for a component that
+parses untrusted documents. Node 20 itself reached end of life in April 2026. This still
+satisfies the project rule "Node.js 20 or later". Hosting (phase 19) must run Node 22 LTS or
+newer.
 
 ## Workspace packages resolve to source during development
 

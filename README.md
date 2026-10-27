@@ -30,7 +30,7 @@ docs/             Design and operational documentation
 
 ## Prerequisites
 
-- Node.js **20.19 or later** (20 LTS, 22 or 24). `.nvmrc` pins the major version.
+- Node.js **22.13 or later** (22 or 24 LTS). `.nvmrc` pins the major version.
 - pnpm **10** (`corepack enable` picks up the version in `package.json`).
 - Docker with Compose v2 — only for the optional local dependencies.
 
