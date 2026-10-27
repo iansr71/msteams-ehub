@@ -9,6 +9,7 @@ import {
   isMoodleError,
   type MoodleError,
 } from './errors.js';
+import { stripCredentialParameters, toMoodleFileSourceUrl } from './fileUrl.js';
 import {
   createRequestSignals,
   errorFromHttpStatus,
@@ -70,25 +71,10 @@ export interface HttpMoodleFileDownloaderOptions {
   readonly userAgent?: string;
 }
 
-const CREDENTIAL_PARAMETERS = ['token', 'wstoken'];
 const DEFAULT_MAX_REDIRECTS = 3;
 /** A JSON body smaller than this is checked for a Moodle exception (bad token, no access). */
 const EXCEPTION_PROBE_BYTES = 64 * 1024;
 const silentLogger = createLogger({ service: 'moodle-client', level: 'silent' });
-
-function invalidUrl(message: string): MoodleValidationError {
-  return new MoodleValidationError(`Rejected Moodle file URL: ${message}`, {
-    code: 'invalid_file_url',
-  });
-}
-
-function stripCredentials(url: URL): URL {
-  const copy = new URL(url.href);
-  for (const name of CREDENTIAL_PARAMETERS) {
-    copy.searchParams.delete(name);
-  }
-  return copy;
-}
 
 /**
  * Downloads files served by Moodle's pluginfile endpoints.
@@ -127,34 +113,7 @@ export class HttpMoodleFileDownloader implements MoodleFileDownloader {
    * callers can store the canonical source URL without downloading.
    */
   toSourceUrl(fileUrl: string): URL {
-    let parsed: URL;
-    try {
-      parsed = new URL(fileUrl);
-    } catch {
-      throw invalidUrl('not an absolute URL.');
-    }
-    const base = this.#options.baseUrl;
-    if (parsed.protocol !== base.protocol) {
-      throw invalidUrl('protocol does not match the Moodle site.');
-    }
-    if (parsed.username !== '' || parsed.password !== '') {
-      throw invalidUrl('URL must not contain credentials.');
-    }
-    if (parsed.host.toLowerCase() !== base.host) {
-      throw invalidUrl('host is not the configured Moodle site.');
-    }
-    if (/%2f|%5c/i.test(parsed.pathname) || parsed.pathname.includes('\\')) {
-      throw invalidUrl('encoded path separators are not allowed.');
-    }
-    const allowedPrefixes = [
-      `${base.pathPrefix}/webservice/pluginfile.php/`,
-      `${base.pathPrefix}/pluginfile.php/`,
-    ];
-    if (!allowedPrefixes.some((prefix) => parsed.pathname.startsWith(prefix))) {
-      throw invalidUrl('only Moodle pluginfile URLs can be downloaded.');
-    }
-    parsed.hash = '';
-    return stripCredentials(parsed);
+    return toMoodleFileSourceUrl(this.#options.baseUrl, fileUrl);
   }
 
   async download(
@@ -264,7 +223,7 @@ export class HttpMoodleFileDownloader implements MoodleFileDownloader {
         { code: 'login_redirect' },
       );
     }
-    return stripCredentials(target);
+    return stripCredentialParameters(target);
   }
 
   async #attempt(

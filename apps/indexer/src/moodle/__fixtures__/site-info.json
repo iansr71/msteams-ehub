@@ -1,0 +1,56 @@
+{
+  "sitename": "E-Hub",
+  "username": "ehub_assistant",
+  "firstname": "E-Hub",
+  "lastname": "Assistant",
+  "fullname": "E-Hub Assistant",
+  "lang": "en",
+  "userid": 42,
+  "siteurl": "https://ehub.example.test",
+  "userpictureurl": "https://ehub.example.test/theme/image.php/boost/core/1/u/f1",
+  "functions": [
+    {
+      "name": "core_webservice_get_site_info",
+      "version": "2025041400"
+    },
+    {
+      "name": "core_course_get_courses",
+      "version": "2025041400"
+    },
+    {
+      "name": "core_course_get_contents",
+      "version": "2025041400"
+    },
+    {
+      "name": "core_enrol_get_enrolled_users",
+      "version": "2025041400"
+    },
+    {
+      "name": "core_enrol_get_users_courses",
+      "version": "2025041400"
+    },
+    {
+      "name": "core_user_get_users_by_field",
+      "version": "2025041400"
+    }
+  ],
+  "downloadfiles": 1,
+  "uploadfiles": 0,
+  "release": "5.0.2 (Build: 20250811)",
+  "version": "2025041402.00",
+  "mobilecssurl": "",
+  "advancedfeatures": [
+    {
+      "name": "usecomments",
+      "value": 1
+    }
+  ],
+  "usercanmanageownfiles": false,
+  "userquota": 0,
+  "usermaxuploadfilesize": -1,
+  "userhomepage": 1,
+  "siteid": 1,
+  "sitecalendartype": "gregorian",
+  "usercalendartype": "gregorian",
+  "theme": "boost"
+}

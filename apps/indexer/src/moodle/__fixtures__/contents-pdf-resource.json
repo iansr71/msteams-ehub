@@ -1,0 +1,60 @@
+[
+  {
+    "id": 101,
+    "name": "General",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 0,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 501,
+        "url": "https://ehub.example.test/mod/resource/view.php?id=501",
+        "name": "Consultation checklist",
+        "instance": 1501,
+        "contextid": 5501,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://ehub.example.test/theme/image.php/boost/resource/1/monologo",
+        "modname": "resource",
+        "modplural": "Resources",
+        "availability": null,
+        "indent": 0,
+        "onclick": "",
+        "afterlink": null,
+        "customdata": "\"\"",
+        "noviewlink": false,
+        "completion": 0,
+        "downloadcontent": 1,
+        "dates": [],
+        "contents": [
+          {
+            "type": "file",
+            "filename": "checklist.pdf",
+            "filepath": "/",
+            "filesize": 182044,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5501/mod_resource/content/3/checklist.pdf?forcedownload=1",
+            "timecreated": 1750000000,
+            "timemodified": 1750000500,
+            "sortorder": 1,
+            "mimetype": "application/pdf",
+            "isexternalfile": false,
+            "userid": 2,
+            "author": "Training Team",
+            "license": "allrightsreserved"
+          }
+        ],
+        "contentsinfo": {
+          "filescount": 1,
+          "filessize": 182044,
+          "lastmodified": 1750000500,
+          "mimetypes": ["application/pdf"],
+          "repositorytype": ""
+        }
+      }
+    ]
+  }
+]

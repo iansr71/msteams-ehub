@@ -15,6 +15,15 @@ import { z } from 'zod';
 const id = z.number().int().nonnegative();
 const timestamp = z.number().int().nonnegative();
 const flag = z.number().int().min(0).max(1);
+/**
+ * Moodle sends `null` for some optional strings (e.g. `filepath` on URL activities). They are
+ * accepted and normalised to `undefined`, so consumers only ever see `string | undefined`.
+ */
+const optionalString = z
+  .string()
+  .nullish()
+  .transform((value) => value ?? undefined)
+  .optional();
 
 export const siteInfoSchema = z.object({
   sitename: z.string(),
@@ -54,19 +63,19 @@ export const coursesSchema = z.array(courseSchema);
 export const moduleContentSchema = z.object({
   type: z.string(),
   filename: z.string(),
-  filepath: z.string().optional(),
+  filepath: optionalString,
   filesize: z.number().int().nonnegative().optional(),
-  fileurl: z.string().optional(),
-  mimetype: z.string().optional(),
+  fileurl: optionalString,
+  mimetype: optionalString,
   timecreated: timestamp.nullable().optional(),
   timemodified: timestamp.nullable().optional(),
   sortorder: z.number().int().nullable().optional(),
   isexternalfile: z.boolean().optional(),
-  repositorytype: z.string().optional(),
+  repositorytype: optionalString,
   author: z.string().nullable().optional(),
   license: z.string().nullable().optional(),
   // Present for inline content (e.g. Book chapter index); length is bounded by the response cap.
-  content: z.string().optional(),
+  content: optionalString,
 });
 export type MoodleModuleContent = z.output<typeof moduleContentSchema>;
 

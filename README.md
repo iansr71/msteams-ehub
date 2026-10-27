@@ -4,16 +4,17 @@ A Microsoft Teams personal app that answers staff questions from Moodle E-Hub co
 Answers are grounded in indexed Moodle resources, carry validated citations, and respect each
 user's Moodle course enrolments.
 
-> **Status: phase 2 (Moodle REST client).** Shared foundation plus a typed, sanitized Moodle
-> client and file downloader (`packages/moodle-client`). Course discovery, extraction,
-> indexing, retrieval, answer generation and Teams behaviour are delivered in later phases.
+> **Status: phase 3 (course discovery).** Shared foundation, a typed and sanitized Moodle
+> client (`packages/moodle-client`), and indexer commands that discover courses and inspect
+> their structure (`moodle:ping`, `moodle:courses`, `moodle:inspect`). Extraction, indexing,
+> retrieval, answer generation and Teams behaviour are delivered in later phases.
 
 ## Repository layout
 
 ```
 apps/
   api/            Question-answering API (retrieval, RAG, auth) — health command today
-  indexer/        Moodle discovery, extraction, chunking and indexing — health command today
+  indexer/        Moodle discovery (moodle:*), later extraction, chunking and indexing
   teams-app/      Teams personal app (phase 12)
 packages/
   shared/         Zod configuration, structured logger, redaction, correlation IDs, CLI/health helpers
@@ -47,20 +48,23 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 
 ## Commands
 
-| Command                 | What it does                                                  |
-| ----------------------- | ------------------------------------------------------------- |
-| `pnpm build`            | Compiles every package to `dist/` (TypeScript project builds) |
-| `pnpm clean`            | Removes build output and coverage                             |
-| `pnpm format`           | Formats the repository with Prettier                          |
-| `pnpm format:check`     | Fails if any file is not formatted                            |
-| `pnpm lint`             | ESLint (type-aware, zero warnings allowed)                    |
-| `pnpm typecheck`        | Strict type check of all packages and tests                   |
-| `pnpm test`             | All Vitest projects (unit, integration, security)             |
-| `pnpm test:unit`        | Unit tests inside `packages/*` and `apps/*`                   |
-| `pnpm test:integration` | Integration tests in `tests/integration`                      |
-| `pnpm test:security`    | Security regression tests in `tests/security`                 |
-| `pnpm api health`       | API configuration health report (JSON)                        |
-| `pnpm indexer health`   | Indexer configuration health report (JSON)                    |
+| Command                                        | What it does                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `pnpm build`                                   | Compiles every package to `dist/` (TypeScript project builds)                            |
+| `pnpm clean`                                   | Removes build output and coverage                                                        |
+| `pnpm format`                                  | Formats the repository with Prettier                                                     |
+| `pnpm format:check`                            | Fails if any file is not formatted                                                       |
+| `pnpm lint`                                    | ESLint (type-aware, zero warnings allowed)                                               |
+| `pnpm typecheck`                               | Strict type check of all packages and tests                                              |
+| `pnpm test`                                    | All Vitest projects (unit, integration, security)                                        |
+| `pnpm test:unit`                               | Unit tests inside `packages/*` and `apps/*`                                              |
+| `pnpm test:integration`                        | Integration tests in `tests/integration`                                                 |
+| `pnpm test:security`                           | Security regression tests in `tests/security`                                            |
+| `pnpm api health`                              | API configuration health report (JSON)                                                   |
+| `pnpm indexer health`                          | Indexer configuration health report (JSON)                                               |
+| `pnpm indexer moodle:ping`                     | Checks the Moodle connection and that the service exposes exactly the expected functions |
+| `pnpm indexer moodle:courses`                  | Lists courses; `--course-id <id[,id]>`, `--search <text>`, `--json`                      |
+| `pnpm indexer moodle:inspect --course-id <id>` | Sections, activities and file metadata for one course; `--json`                          |
 
 Validation gate used before every phase is committed:
 
@@ -141,4 +145,5 @@ Strict TypeScript with no `any`; Zod for all external input; interfaces and depe
 around every external service; structured JSON logs with correlation IDs; no credentials or
 document contents in logs; fail closed on authentication and authorisation; Moodle content is
 untrusted data. See [`docs/decisions.md`](docs/decisions.md) for the foundation decisions and
-[`docs/moodle-setup.md`](docs/moodle-setup.md) for the restricted Moodle web service.
+[`docs/moodle-setup.md`](docs/moodle-setup.md) for the restricted Moodle web service and the
+`moodle:*` verification commands.

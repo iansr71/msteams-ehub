@@ -1,0 +1,30 @@
+[
+  {
+    "id": 301,
+    "name": "",
+    "modules": [
+      {
+        "id": 1001,
+        "name": "Bare page",
+        "modname": "page"
+      },
+      {
+        "id": 1002,
+        "name": "Bare file",
+        "modname": "resource",
+        "contents": [
+          {
+            "type": "file",
+            "filename": "untitled"
+          }
+        ]
+      },
+      {
+        "id": 1003,
+        "name": "Bare book",
+        "modname": "book",
+        "contents": []
+      }
+    ]
+  }
+]

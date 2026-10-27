@@ -1,0 +1,50 @@
+[
+  {
+    "id": 1,
+    "shortname": "ehub",
+    "categoryid": 0,
+    "fullname": "E-Hub",
+    "displayname": "E-Hub",
+    "format": "site",
+    "summary": "",
+    "summaryformat": 1,
+    "startdate": 0,
+    "enddate": 0,
+    "visible": 1
+  },
+  {
+    "id": 12,
+    "shortname": "CONSULT101",
+    "categoryid": 3,
+    "fullname": "Consultation Standards",
+    "displayname": "Consultation Standards",
+    "idnumber": "",
+    "summary": "<p>How we run consultations.</p>",
+    "summaryformat": 1,
+    "format": "topics",
+    "startdate": 1735689600,
+    "enddate": 0,
+    "visible": 1,
+    "timecreated": 1735600000,
+    "timemodified": 1760000000,
+    "lang": ""
+  },
+  {
+    "id": 7,
+    "shortname": "LASER-SAFE",
+    "categoryid": 3,
+    "fullname": "Laser Safety Procedures",
+    "displayname": "Laser Safety Procedures",
+    "idnumber": "SR-LS-01",
+    "format": "topics",
+    "startdate": 1704067200,
+    "enddate": 0,
+    "visible": 0,
+    "timemodified": 1755000000
+  },
+  {
+    "id": 30,
+    "shortname": "MIN",
+    "fullname": "Minimal Course"
+  }
+]

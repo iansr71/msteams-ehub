@@ -1,0 +1,73 @@
+[
+  {
+    "id": 101,
+    "name": "General",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 0,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 601,
+        "url": "https://ehub.example.test/mod/page/view.php?id=601",
+        "name": "Opening the branch",
+        "instance": 1601,
+        "contextid": 5601,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://ehub.example.test/theme/image.php/boost/page/1/monologo",
+        "modname": "page",
+        "modplural": "Pages",
+        "availability": null,
+        "indent": 0,
+        "onclick": "",
+        "afterlink": null,
+        "customdata": "\"\"",
+        "noviewlink": false,
+        "completion": 0,
+        "downloadcontent": 1,
+        "dates": [],
+        "contents": [
+          {
+            "type": "file",
+            "filename": "index.html",
+            "filepath": "/",
+            "filesize": 0,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5601/mod_page/content/4/index.html?forcedownload=1",
+            "timecreated": null,
+            "timemodified": 1752000000,
+            "sortorder": 1,
+            "userid": null,
+            "author": null,
+            "license": null
+          },
+          {
+            "type": "file",
+            "filename": "alarm-panel.png",
+            "filepath": "/",
+            "filesize": 24000,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5601/mod_page/content/4/alarm-panel.png?forcedownload=1",
+            "timecreated": 1750000000,
+            "timemodified": 1750000500,
+            "sortorder": 0,
+            "mimetype": "image/png",
+            "isexternalfile": false,
+            "userid": 2,
+            "author": "Training Team",
+            "license": "allrightsreserved"
+          }
+        ],
+        "contentsinfo": {
+          "filescount": 2,
+          "filessize": 24000,
+          "lastmodified": 1752000000,
+          "mimetypes": ["image/png"],
+          "repositorytype": ""
+        }
+      }
+    ]
+  }
+]

@@ -67,14 +67,29 @@ _Site administration → Server → Web services → External services → Add_
 
 Then _Functions → Add functions_ and add exactly these six, nothing else:
 
-| Function                        | Used for                                    |
-| ------------------------------- | ------------------------------------------- |
-| `core_webservice_get_site_info` | Connectivity check (`moodle:ping`, phase 3) |
-| `core_course_get_courses`       | Course discovery                            |
-| `core_course_get_contents`      | Sections, activities and file metadata      |
-| `core_enrol_get_enrolled_users` | Enrolment checks for course authorisation   |
-| `core_enrol_get_users_courses`  | A user's enrolled courses                   |
-| `core_user_get_users_by_field`  | Identity mapping (Entra ID → Moodle user)   |
+These are the **exact** functions the application calls. The list is defined in code as
+`SUPPORTED_MOODLE_FUNCTIONS` (`packages/moodle-client/src/transport.ts`), a test keeps this
+table identical to it, and `moodle:ping` checks the live service against it.
+
+<!-- moodle-functions:start -->
+
+| Function                        | Called by                                   | Parameters sent                                          | Used for                                                    |
+| ------------------------------- | ------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------- |
+| `core_webservice_get_site_info` | `moodle:ping`                               | none                                                     | Connectivity, service-account identity, function check      |
+| `core_course_get_courses`       | `moodle:courses`, `moodle:inspect`          | `options[ids][]` (optional)                              | Course discovery and course metadata                        |
+| `core_course_get_contents`      | `moodle:inspect`, indexing (phase 4 onward) | `courseid`, optional `options[excludecontents]`          | Sections, activities, Page/Book structure and file metadata |
+| `core_enrol_get_enrolled_users` | Authorisation (phase 14)                    | `courseid`, `options[onlyactive/limitfrom/limitnumber]`  | Enrolment checks for course authorisation                   |
+| `core_enrol_get_users_courses`  | Authorisation (phase 14)                    | `userid`, `returnusercount=0`                            | A user's enrolled courses                                   |
+| `core_user_get_users_by_field`  | Identity mapping (phase 14)                 | `field` (`id`/`idnumber`/`username`/`email`), `values[]` | Map an Entra ID user to a Moodle user                       |
+
+<!-- moodle-functions:end -->
+
+File content is **not** fetched through a web-service function: it is downloaded from
+`webservice/pluginfile.php` using the same token, which is why the service needs
+**Can download files** enabled.
+
+Do not add other functions "just in case". `moodle:ping` reports any extra functions as
+`unexpected_functions`; remove them from the service to keep the token least-privilege.
 
 When adding each function, note the **Required capabilities** column and make sure the role
 from step 3 grants them.
@@ -115,12 +130,40 @@ is removed automatically. https is mandatory when `NODE_ENV=production`.
 
 ## 7. Verify
 
-From phase 3, `pnpm indexer moodle:ping` calls `core_webservice_get_site_info` and reports
-success or a sanitized failure category. Until then, check in Moodle:
+Run these from the repository root with `MOODLE_BASE_URL` and `MOODLE_TOKEN` set in `.env`:
 
-- _External services → E-Hub Teams Assistant → Functions_ lists exactly the six functions.
-- _Manage tokens_ shows the token bound to the service account and service, with IP
-  restriction and expiry set.
+```bash
+pnpm -s indexer moodle:ping                      # connection + service setup check
+pnpm -s indexer moodle:courses                   # courses the service account can see
+pnpm -s indexer moodle:courses --search consult  # filter by name, short name or ID number
+pnpm -s indexer moodle:inspect --course-id 12    # one course: sections, activities, files
+```
+
+Add `--json` to any of them for machine-readable output. None of them downloads or reads file
+content, and none prints the token.
+
+`moodle:ping` exits `0` when the service is usable and `1` otherwise. It checks:
+
+| Check                     | Result                                                            |
+| ------------------------- | ----------------------------------------------------------------- |
+| Token accepted            | Failure: `authentication / invalidtoken` (and related codes)      |
+| All six functions present | Missing ones listed; status `INCOMPLETE`, exit `1`                |
+| No extra functions        | Extra ones listed as unexpected; warning only                     |
+| Can download files        | Disabled: status `INCOMPLETE`, exit `1`                           |
+| Site URL matches config   | Mismatch: warning (check `MOODLE_BASE_URL` and any reverse proxy) |
+
+`moodle:inspect` lists each activity as **supported** or **unsupported** for indexing:
+
+- Supported: Moodle **Page**, Moodle **Book** (one resource per chapter), and files in
+  **File** and **Folder** activities whose type is PDF, plain text, HTML, DOCX or PPTX.
+- Unsupported (reported, not failed): every other activity type (quiz, forum, assignment,
+  URL, label…), other file types, files stored in external repositories, files over
+  `MOODLE_MAX_DOWNLOAD_BYTES`, and file URLs that are not on the Moodle site.
+- File types are judged from Moodle's declared metadata at this stage; extraction (phase 4)
+  verifies the real type from the file content.
+
+Also confirm in Moodle that _Manage tokens_ shows the token bound to the service account and
+service, with IP restriction and expiry set.
 
 ## How the client protects the token
 

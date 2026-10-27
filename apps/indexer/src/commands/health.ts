@@ -15,7 +15,7 @@ export const INDEXER_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
   {
     feature: 'moodle',
     requirement: 'optional',
-    missingNote: 'Not required until course discovery is implemented (phase 3).',
+    missingNote: 'Needed for the moodle:* commands and, from phase 4, indexing.',
   },
   {
     feature: 'azureSearch',

@@ -1,0 +1,123 @@
+[
+  {
+    "id": 101,
+    "name": "General",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 0,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 701,
+        "url": "https://ehub.example.test/mod/book/view.php?id=701",
+        "name": "Skin Analysis Handbook",
+        "instance": 1701,
+        "contextid": 5701,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://ehub.example.test/theme/image.php/boost/book/1/monologo",
+        "modname": "book",
+        "modplural": "Books",
+        "availability": null,
+        "indent": 0,
+        "onclick": "",
+        "afterlink": null,
+        "customdata": "\"\"",
+        "noviewlink": false,
+        "completion": 0,
+        "downloadcontent": 1,
+        "dates": [],
+        "contents": [
+          {
+            "type": "content",
+            "filename": "structure",
+            "filepath": "/",
+            "filesize": 0,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5701/mod_book/structure",
+            "content": "[{\"title\": \"Introduction\", \"href\": \"11/index.html\", \"level\": 0, \"hidden\": \"0\", \"subitems\": []}, {\"title\": \"Skin types\", \"href\": \"12/index.html\", \"level\": 0, \"hidden\": \"0\", \"subitems\": [{\"title\": \"Fitzpatrick scale\", \"href\": \"13/index.html\", \"level\": 1, \"hidden\": \"0\", \"subitems\": []}]}, {\"title\": \"Draft: new protocol\", \"href\": \"14/index.html\", \"level\": 0, \"hidden\": \"1\", \"subitems\": []}]",
+            "timecreated": 1751000000,
+            "timemodified": 1751600000,
+            "sortorder": 0,
+            "userid": null,
+            "author": null,
+            "license": null
+          },
+          {
+            "type": "file",
+            "filename": "index.html",
+            "filepath": "/11/",
+            "filesize": 0,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5701/mod_book/chapter/11/index.html",
+            "timecreated": 1751000000,
+            "timemodified": 1751500011,
+            "sortorder": 1,
+            "userid": null,
+            "author": null,
+            "license": null,
+            "content": "Introduction"
+          },
+          {
+            "type": "file",
+            "filename": "index.html",
+            "filepath": "/12/",
+            "filesize": 0,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5701/mod_book/chapter/12/index.html",
+            "timecreated": 1751000000,
+            "timemodified": 1751500012,
+            "sortorder": 2,
+            "userid": null,
+            "author": null,
+            "license": null,
+            "content": "Skin types"
+          },
+          {
+            "type": "file",
+            "filename": "scale.jpg",
+            "filepath": "/12/",
+            "filesize": 88000,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5701/mod_book/chapter/12/scale.jpg",
+            "timecreated": 1750000000,
+            "timemodified": 1750000500,
+            "sortorder": 0,
+            "mimetype": "image/jpeg",
+            "isexternalfile": false,
+            "userid": 2,
+            "author": "Training Team",
+            "license": "allrightsreserved"
+          },
+          {
+            "type": "file",
+            "filename": "index.html",
+            "filepath": "/13/",
+            "filesize": 0,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5701/mod_book/chapter/13/index.html",
+            "timecreated": 1751000000,
+            "timemodified": 1751500013,
+            "sortorder": 3,
+            "userid": null,
+            "author": null,
+            "license": null,
+            "content": "Fitzpatrick scale"
+          },
+          {
+            "type": "file",
+            "filename": "index.html",
+            "filepath": "/14/",
+            "filesize": 0,
+            "fileurl": "https://ehub.example.test/webservice/pluginfile.php/5701/mod_book/chapter/14/index.html",
+            "timecreated": 1751000000,
+            "timemodified": 1751500014,
+            "sortorder": 4,
+            "userid": null,
+            "author": null,
+            "license": null,
+            "content": "Draft: new protocol"
+          }
+        ]
+      }
+    ]
+  }
+]

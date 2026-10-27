@@ -3,6 +3,7 @@ export * from './client.js';
 export * from './downloader.js';
 export * from './errors.js';
 export * from './factory.js';
+export * from './fileUrl.js';
 export { type FetchFn } from './http.js';
 export * from './params.js';
 export * from './retry.js';

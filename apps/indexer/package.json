@@ -25,6 +25,8 @@
     "ehub-indexer": "./dist/cli.js"
   },
   "dependencies": {
-    "@ehub/shared": "workspace:*"
+    "@ehub/moodle-client": "workspace:*",
+    "@ehub/shared": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

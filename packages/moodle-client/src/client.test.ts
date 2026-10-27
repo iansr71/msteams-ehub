@@ -73,6 +73,41 @@ describe('DefaultMoodleClient', () => {
     ]);
   });
 
+  it('accepts null optional strings Moodle sends for URL activities, as undefined', async () => {
+    const { client } = clientReturning([
+      {
+        id: 1,
+        name: 'General',
+        modules: [
+          {
+            id: 9,
+            name: 'Supplier portal',
+            modname: 'url',
+            contents: [
+              {
+                type: 'url',
+                filename: 'Supplier portal',
+                filepath: null,
+                filesize: 0,
+                fileurl: 'https://supplier.example.test/',
+                mimetype: null,
+                timecreated: null,
+                sortorder: null,
+                author: null,
+                license: null,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const [section] = await client.getCourseContents(1);
+    const item = section?.modules[0]?.contents?.[0];
+    expect(item?.filepath).toBeUndefined();
+    expect(item?.mimetype).toBeUndefined();
+    expect(item?.fileurl).toBe('https://supplier.example.test/');
+  });
+
   it('getEnrolledUsers passes paging options and strips undeclared personal data', async () => {
     const { client, calls } = clientReturning(fixtures.enrolledUsers);
     const users = await client.getEnrolledUsers(12, {
