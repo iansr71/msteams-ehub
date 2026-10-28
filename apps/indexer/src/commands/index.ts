@@ -5,9 +5,11 @@ import { createExtractTestCommand } from './extractCommand.js';
 import { createHealthCommand } from './health.js';
 import { createMoodleCommands } from './moodleCommands.js';
 import type { MoodleCommandDependencies } from './moodleServices.js';
+import { createSearchCommands, type SearchCommandDependencies } from './searchCommands.js';
 
 export interface IndexerCommandDependencies {
   readonly moodle?: MoodleCommandDependencies;
+  readonly search?: SearchCommandDependencies;
 }
 
 export function createIndexerCommands(
@@ -20,5 +22,6 @@ export function createIndexerCommands(
     ...createMoodleCommands(moodle),
     'extract:test': createExtractTestCommand(moodle),
     'chunk:test': createChunkTestCommand(moodle),
+    ...createSearchCommands(dependencies.search ?? { env }),
   };
 }

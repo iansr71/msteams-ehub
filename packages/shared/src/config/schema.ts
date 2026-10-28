@@ -8,6 +8,7 @@ export type NodeEnvironment = (typeof NODE_ENVIRONMENTS)[number];
 /** Variables whose values are secrets: never printed, always registered for log scrubbing. */
 export const SECRET_ENV_KEYS = [
   'MOODLE_TOKEN',
+  'AZURE_SEARCH_API_KEY',
   'AZURE_CLIENT_SECRET',
   'APPLICATIONINSIGHTS_CONNECTION_STRING',
 ] as const;
@@ -116,9 +117,32 @@ export const moodleConfigShape = {
   MOODLE_MAX_RETRIES: boundedInteger(0, 10, MOODLE_DEFAULTS.maxRetries),
 };
 
+export const SEARCH_DEFAULTS = {
+  indexName: 'ehub-course-content-v1',
+  vectorDimensions: 1536,
+  batchSize: 500,
+  requestTimeoutMs: 30_000,
+  maxRetries: 3,
+} as const;
+
+const booleanFlag = (fallback: boolean) =>
+  z
+    .enum(['true', 'false'], { message: 'Must be true or false.' })
+    .default(fallback ? 'true' : 'false')
+    .transform((value) => value === 'true');
+
 export const azureSearchConfigShape = {
   AZURE_SEARCH_ENDPOINT: serviceUrl({ httpsOnly: true }),
-  AZURE_SEARCH_INDEX_NAME: searchIndexName,
+  AZURE_SEARCH_INDEX_NAME: searchIndexName.default(SEARCH_DEFAULTS.indexName),
+  /** Local development only; Azure deployments authenticate with Managed Identity. */
+  AZURE_SEARCH_API_KEY: secretString(20).optional(),
+  /** Must equal the embedding model's output size (text-embedding-3-small: 1536). */
+  AZURE_SEARCH_VECTOR_DIMENSIONS: boundedInteger(1, 3072, SEARCH_DEFAULTS.vectorDimensions),
+  /** Semantic ranking needs a Basic or higher tier with the semantic ranker enabled. */
+  AZURE_SEARCH_SEMANTIC_ENABLED: booleanFlag(true),
+  AZURE_SEARCH_BATCH_SIZE: boundedInteger(1, 1000, SEARCH_DEFAULTS.batchSize),
+  AZURE_SEARCH_REQUEST_TIMEOUT_MS: boundedInteger(1_000, 300_000, SEARCH_DEFAULTS.requestTimeoutMs),
+  AZURE_SEARCH_MAX_RETRIES: boundedInteger(0, 10, SEARCH_DEFAULTS.maxRetries),
 };
 
 export const azureOpenAIConfigShape = {

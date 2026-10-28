@@ -19,6 +19,7 @@ import {
 // Obviously fake values; none of these is a real credential or endpoint.
 const FAKE_MOODLE_TOKEN = 'fake-moodle-token-0123456789abcdef';
 const FAKE_CLIENT_SECRET = 'fake-client-secret-value';
+const FAKE_SEARCH_KEY = 'fake-search-admin-key-0123456789';
 
 const validEnv = {
   NODE_ENV: 'development',
@@ -108,7 +109,6 @@ describe('application configuration', () => {
         'AZURE_OPENAI_EMBEDDING_DEPLOYMENT',
         'AZURE_OPENAI_ENDPOINT',
         'AZURE_SEARCH_ENDPOINT',
-        'AZURE_SEARCH_INDEX_NAME',
         'AZURE_TENANT_ID',
         'MOODLE_BASE_URL',
         'MOODLE_TOKEN',
@@ -260,6 +260,56 @@ describe('getConfigFeatureStatus', () => {
 
   it('treats a feature with only optional variables as valid when absent', () => {
     expect(getConfigFeatureStatus('observability', {}).state).toBe('valid');
+  });
+
+  it('applies Azure AI Search defaults and parses the semantic flag', () => {
+    const config = loadConfig(azureSearchConfigSchema, {
+      AZURE_SEARCH_ENDPOINT: 'https://search.example.test',
+    });
+    expect(config).toMatchObject({
+      AZURE_SEARCH_INDEX_NAME: 'ehub-course-content-v1',
+      AZURE_SEARCH_VECTOR_DIMENSIONS: 1536,
+      AZURE_SEARCH_SEMANTIC_ENABLED: true,
+      AZURE_SEARCH_BATCH_SIZE: 500,
+      AZURE_SEARCH_MAX_RETRIES: 3,
+    });
+    expect(
+      loadConfig(azureSearchConfigSchema, {
+        AZURE_SEARCH_ENDPOINT: 'https://search.example.test',
+        AZURE_SEARCH_SEMANTIC_ENABLED: 'false',
+      }).AZURE_SEARCH_SEMANTIC_ENABLED,
+    ).toBe(false);
+  });
+
+  it('rejects invalid Azure AI Search settings without echoing the key', () => {
+    const error = expectIssues(() =>
+      loadConfig(azureSearchConfigSchema, {
+        AZURE_SEARCH_ENDPOINT: 'http://search.example.test',
+        AZURE_SEARCH_INDEX_NAME: 'Bad_Name',
+        AZURE_SEARCH_API_KEY: `${FAKE_SEARCH_KEY} x`,
+        AZURE_SEARCH_VECTOR_DIMENSIONS: '0',
+        AZURE_SEARCH_SEMANTIC_ENABLED: 'yes',
+        AZURE_SEARCH_BATCH_SIZE: '1001',
+      }),
+    );
+    expect(error.issues.map((issue) => issue.variable).sort()).toEqual([
+      'AZURE_SEARCH_API_KEY',
+      'AZURE_SEARCH_BATCH_SIZE',
+      'AZURE_SEARCH_ENDPOINT',
+      'AZURE_SEARCH_INDEX_NAME',
+      'AZURE_SEARCH_SEMANTIC_ENABLED',
+      'AZURE_SEARCH_VECTOR_DIMENSIONS',
+    ]);
+    expect(error.message).not.toContain(FAKE_SEARCH_KEY);
+  });
+
+  it('treats the search API key as a secret', () => {
+    const config = loadConfig(azureSearchConfigSchema, {
+      AZURE_SEARCH_ENDPOINT: 'https://search.example.test',
+      AZURE_SEARCH_API_KEY: FAKE_SEARCH_KEY,
+    });
+    expect(describeConfig(config)['AZURE_SEARCH_API_KEY']).not.toContain(FAKE_SEARCH_KEY);
+    expect(redactString(`key=${FAKE_SEARCH_KEY}`)).not.toContain(FAKE_SEARCH_KEY);
   });
 
   it('works for each feature schema used by the applications', () => {

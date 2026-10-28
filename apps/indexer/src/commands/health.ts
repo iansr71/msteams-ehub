@@ -20,7 +20,7 @@ export const INDEXER_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
   {
     feature: 'azureSearch',
     requirement: 'optional',
-    missingNote: 'Not required until indexing is implemented (phase 6).',
+    missingNote: 'Needed for the search:* commands and, from phase 11, indexing.',
   },
   {
     feature: 'azureOpenAI',

@@ -68,6 +68,9 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm indexer moodle:inspect --course-id <id>`                  | Sections, activities and file metadata for one course; `--json`                          |
 | `pnpm indexer extract:test --course-id <id> --resource-id <id>` | Downloads and extracts one resource; prints metadata, counts and a short preview         |
 | `pnpm indexer chunk:test --course-id <id> --resource-id <id>`   | Chunks one resource; prints chunk numbers, token counts and metadata (no chunk text)     |
+| `pnpm indexer search:create-index`                              | Creates the index if missing; never deletes; `--apply-compatible-changes`, `--json`      |
+| `pnpm indexer search:validate-index`                            | Compares the deployed index schema with this version; exit 1 unless it matches           |
+| `pnpm indexer search:health`                                    | Service reachability, index existence, document count and storage; `--json`              |
 
 Validation gate used before every phase is committed:
 
@@ -107,8 +110,14 @@ Validated with Zod in `packages/shared/src/config`. Empty values are treated as 
 | `MOODLE_DOWNLOAD_TIMEOUT_MS`            | moodle        | Optional; 1000–1800000, default 120000                 |
 | `MOODLE_MAX_DOWNLOAD_BYTES`             | moodle        | Optional; 1 KiB–2 GiB, default 100 MiB                 |
 | `MOODLE_MAX_RETRIES`                    | moodle        | Optional; 0–10, default 3                              |
-| `AZURE_SEARCH_ENDPOINT`                 | azureSearch   | https                                                  |
-| `AZURE_SEARCH_INDEX_NAME`               | azureSearch   | Azure index naming rules                               |
+| `AZURE_SEARCH_ENDPOINT`                 | azureSearch   | https, no path                                         |
+| `AZURE_SEARCH_INDEX_NAME`               | azureSearch   | Optional; default `ehub-course-content-v1`             |
+| `AZURE_SEARCH_API_KEY`                  | azureSearch   | Secret, optional — local only; Azure uses Entra ID     |
+| `AZURE_SEARCH_VECTOR_DIMENSIONS`        | azureSearch   | Optional; 1–3072, default 1536 (must match embeddings) |
+| `AZURE_SEARCH_SEMANTIC_ENABLED`         | azureSearch   | Optional; `true` (default) or `false` (Free tier)      |
+| `AZURE_SEARCH_BATCH_SIZE`               | azureSearch   | Optional; 1–1000, default 500                          |
+| `AZURE_SEARCH_REQUEST_TIMEOUT_MS`       | azureSearch   | Optional; 1000–300000, default 30000                   |
+| `AZURE_SEARCH_MAX_RETRIES`              | azureSearch   | Optional; 0–10, default 3                              |
 | `AZURE_OPENAI_ENDPOINT`                 | azureOpenAI   | https                                                  |
 | `AZURE_OPENAI_CHAT_DEPLOYMENT`          | azureOpenAI   | Deployment name                                        |
 | `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`     | azureOpenAI   | Deployment name                                        |

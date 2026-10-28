@@ -9,6 +9,11 @@
       "@ehub/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./search": {
+      "@ehub/source": "./src/search/index.ts",
+      "types": "./dist/search/index.d.ts",
+      "default": "./dist/search/index.js"
     }
   },
   "files": [
@@ -20,6 +25,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@azure/identity": "4.13.3",
     "zod": "^4.6.7"
   }
 }

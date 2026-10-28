@@ -57,3 +57,21 @@ Azure OpenAI `text-embedding-3-*`, `o200k_base` the GPT-4o family. `js-tiktoken`
 were days old. Two hazards were found and handled: by default it throws on `<|endoftext|>` in
 input (documents are untrusted; special tokens are disabled), and its BPE is quadratic on long
 repetitive runs (runs over 64 characters are bounded by UTF-8 length instead of encoded).
+
+## Azure AI Search through REST, not the SDK (phase 6)
+
+The search client calls the REST API (`api-version=2026-04-01`, GA) with `fetch` instead of
+using `@azure/search-documents`. The client is small (index get/put, document batches, queries,
+statistics), and owning the requests keeps three things under this code's control: the retry
+rules (whole-request versus per-document), what can reach a log or error message (no headers,
+no document values, no query text), and a fake service that tests can run against in-process
+and over HTTPS. `@azure/identity` is still used for Microsoft Entra ID tokens, loaded only when
+no API key is configured.
+
+## The search index is never recreated by code (phase 6)
+
+`search:create-index` creates a missing index (`If-None-Match: *`) and applies only in-place
+compatible changes, and only when asked (`--apply-compatible-changes`, guarded by the index
+ETag). Incompatible differences stop with migration guidance: a new versioned index is built
+and switched to, and the old one is deleted by a person. There is no delete command, because
+deleting the live index removes search for every user until a full re-index finishes.
