@@ -1,5 +1,6 @@
 import type { CommandDefinition } from '@ehub/shared';
 
+import { createChunkTestCommand } from './chunkCommand.js';
 import { createExtractTestCommand } from './extractCommand.js';
 import { createHealthCommand } from './health.js';
 import { createMoodleCommands } from './moodleCommands.js';
@@ -18,5 +19,6 @@ export function createIndexerCommands(
     health: createHealthCommand(env),
     ...createMoodleCommands(moodle),
     'extract:test': createExtractTestCommand(moodle),
+    'chunk:test': createChunkTestCommand(moodle),
   };
 }

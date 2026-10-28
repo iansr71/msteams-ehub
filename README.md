@@ -4,17 +4,18 @@ A Microsoft Teams personal app that answers staff questions from Moodle E-Hub co
 Answers are grounded in indexed Moodle resources, carry validated citations, and respect each
 user's Moodle course enrolments.
 
-> **Status: phase 4 (extraction).** Shared foundation, a typed and sanitized Moodle client
-> (`packages/moodle-client`), course discovery (`moodle:*`), and secure text extraction for
-> PDF, Moodle Page and Book, HTML, plain text, DOCX and PPTX (`extract:test`). Chunking,
-> indexing, retrieval, answer generation and Teams behaviour are delivered in later phases.
+> **Status: phase 5 (chunking).** Shared foundation, a typed and sanitized Moodle client
+> (`packages/moodle-client`), course discovery (`moodle:*`), secure text extraction for PDF,
+> Moodle Page and Book, HTML, plain text, DOCX and PPTX (`extract:test`), and structure-aware
+> chunking (`chunk:test`). Indexing, retrieval, answer generation and Teams behaviour are
+> delivered in later phases.
 
 ## Repository layout
 
 ```
 apps/
   api/            Question-answering API (retrieval, RAG, auth) — health command today
-  indexer/        Moodle discovery (moodle:*) and extraction (extract:test); later chunking and indexing
+  indexer/        Moodle discovery, extraction and chunking (moodle:*, extract:test, chunk:test); later indexing
   teams-app/      Teams personal app (phase 12)
 packages/
   shared/         Zod configuration, structured logger, redaction, correlation IDs, CLI/health helpers
@@ -66,6 +67,7 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm indexer moodle:courses`                                   | Lists courses; `--course-id <id[,id]>`, `--search <text>`, `--json`                      |
 | `pnpm indexer moodle:inspect --course-id <id>`                  | Sections, activities and file metadata for one course; `--json`                          |
 | `pnpm indexer extract:test --course-id <id> --resource-id <id>` | Downloads and extracts one resource; prints metadata, counts and a short preview         |
+| `pnpm indexer chunk:test --course-id <id> --resource-id <id>`   | Chunks one resource; prints chunk numbers, token counts and metadata (no chunk text)     |
 
 Validation gate used before every phase is committed:
 
@@ -118,6 +120,11 @@ Validated with Zod in `packages/shared/src/config`. Empty values are treated as 
 | `EXTRACTION_TIMEOUT_MS`                 | extraction    | Optional; default 60000                                |
 | `EXTRACTION_MAX_ARCHIVE_ENTRIES`        | extraction    | Optional; default 2000                                 |
 | `EXTRACTION_MAX_UNCOMPRESSED_BYTES`     | extraction    | Optional; default 200 MiB                              |
+| `CHUNK_TARGET_TOKENS`                   | chunking      | Optional; default 850                                  |
+| `CHUNK_MAX_TOKENS`                      | chunking      | Optional; default 1000                                 |
+| `CHUNK_MIN_TOKENS`                      | chunking      | Optional; default 100                                  |
+| `CHUNK_OVERLAP_TOKENS`                  | chunking      | Optional; default 125                                  |
+| `CHUNK_TOKENIZER`                       | chunking      | Optional; `cl100k_base` (default) or `o200k_base`      |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | observability | Secret, optional                                       |
 
 In production every `*_URL` / `*_ENDPOINT` variable must use https.
@@ -152,4 +159,5 @@ around every external service; structured JSON logs with correlation IDs; no cre
 document contents in logs; fail closed on authentication and authorisation; Moodle content is
 untrusted data. See [`docs/decisions.md`](docs/decisions.md) for the foundation decisions and
 [`docs/moodle-setup.md`](docs/moodle-setup.md) for the restricted Moodle web service and the
-`moodle:*` verification commands, and [`docs/extraction.md`](docs/extraction.md) for extraction.
+`moodle:*` verification commands, [`docs/extraction.md`](docs/extraction.md) for extraction, and
+[`docs/chunking.md`](docs/chunking.md) for chunking.

@@ -48,3 +48,12 @@ Production-only rules (https) are applied by `defineConfigSchema` to every group
 stdout carries only the command result (JSON for machine use); logs go to stderr. Unexpected
 errors are logged through the redacting logger and reported as `{ "status": "error",
 "correlationId": … }` with exit code 1.
+
+## Tokenizer: js-tiktoken with cl100k_base (phase 5)
+
+Chunk sizes are measured in the tokens of the model that consumes them: `cl100k_base` matches
+Azure OpenAI `text-embedding-3-*`, `o200k_base` the GPT-4o family. `js-tiktoken` 1.0.21 (August
+2025, a port of OpenAI's tiktoken) was chosen over `gpt-tokenizer` 4.x, whose latest releases
+were days old. Two hazards were found and handled: by default it throws on `<|endoftext|>` in
+input (documents are untrusted; special tokens are disabled), and its BPE is quadratic on long
+repetitive runs (runs over 64 characters are bounded by UTF-8 length instead of encoded).

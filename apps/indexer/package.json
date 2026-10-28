@@ -30,6 +30,7 @@
     "domhandler": "6.0.1",
     "domutils": "4.0.2",
     "htmlparser2": "12.0.0",
+    "js-tiktoken": "1.0.21",
     "pdfjs-dist": "6.4.299",
     "saxes": "6.0.0",
     "yauzl": "3.4.0",

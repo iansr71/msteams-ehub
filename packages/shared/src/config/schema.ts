@@ -158,6 +158,25 @@ export const extractionConfigShape = {
   ),
 };
 
+export const CHUNKING_DEFAULTS = {
+  targetTokens: 850,
+  maxTokens: 1_000,
+  minTokens: 100,
+  overlapTokens: 125,
+  tokenizer: 'cl100k_base',
+} as const;
+
+/** Tokenizers available for counting: cl100k_base (text-embedding-3-*), o200k_base (GPT-4o family). */
+export const CHUNK_TOKENIZERS = ['cl100k_base', 'o200k_base'] as const;
+
+export const chunkingConfigShape = {
+  CHUNK_TARGET_TOKENS: boundedInteger(50, 8_000, CHUNKING_DEFAULTS.targetTokens),
+  CHUNK_MAX_TOKENS: boundedInteger(50, 8_000, CHUNKING_DEFAULTS.maxTokens),
+  CHUNK_MIN_TOKENS: boundedInteger(1, 8_000, CHUNKING_DEFAULTS.minTokens),
+  CHUNK_OVERLAP_TOKENS: boundedInteger(0, 4_000, CHUNKING_DEFAULTS.overlapTokens),
+  CHUNK_TOKENIZER: z.enum(CHUNK_TOKENIZERS).default(CHUNKING_DEFAULTS.tokenizer),
+};
+
 export const observabilityConfigShape = {
   APPLICATIONINSIGHTS_CONNECTION_STRING: z
     .string()
@@ -174,6 +193,31 @@ export const azureSearchConfigSchema = defineConfigSchema(azureSearchConfigShape
 export const azureOpenAIConfigSchema = defineConfigSchema(azureOpenAIConfigShape);
 export const azureIdentityConfigSchema = defineConfigSchema(azureIdentityConfigShape);
 export const extractionConfigSchema = defineConfigSchema(extractionConfigShape);
+export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).superRefine(
+  (config, ctx) => {
+    if (config.CHUNK_MIN_TOKENS >= config.CHUNK_TARGET_TOKENS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CHUNK_MIN_TOKENS'],
+        message: 'Must be less than CHUNK_TARGET_TOKENS.',
+      });
+    }
+    if (config.CHUNK_TARGET_TOKENS > config.CHUNK_MAX_TOKENS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CHUNK_TARGET_TOKENS'],
+        message: 'Must not exceed CHUNK_MAX_TOKENS.',
+      });
+    }
+    if (config.CHUNK_OVERLAP_TOKENS * 2 > config.CHUNK_TARGET_TOKENS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CHUNK_OVERLAP_TOKENS'],
+        message: 'Must be at most half of CHUNK_TARGET_TOKENS.',
+      });
+    }
+  },
+);
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
 
 const URL_KEY_PATTERN = /_(?:URL|ENDPOINT)$/;
@@ -202,6 +246,7 @@ export function defineConfigSchema<Shape extends z.ZodRawShape>(
 export const applicationConfigSchema = defineConfigSchema({
   ...moodleConfigShape,
   ...extractionConfigShape,
+  ...chunkingConfigShape,
   ...azureSearchConfigShape,
   ...azureOpenAIConfigShape,
   ...azureIdentityConfigShape,
@@ -214,6 +259,7 @@ export type AzureSearchConfig = z.output<typeof azureSearchConfigSchema>;
 export type AzureOpenAIConfig = z.output<typeof azureOpenAIConfigSchema>;
 export type AzureIdentityConfig = z.output<typeof azureIdentityConfigSchema>;
 export type ExtractionConfig = z.output<typeof extractionConfigSchema>;
+export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
 
@@ -225,6 +271,7 @@ export const CONFIG_FEATURES = {
   azureOpenAI: azureOpenAIConfigSchema,
   azureIdentity: azureIdentityConfigSchema,
   extraction: extractionConfigSchema,
+  chunking: chunkingConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -238,5 +285,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   azureOpenAI: Object.keys(azureOpenAIConfigShape),
   azureIdentity: Object.keys(azureIdentityConfigShape),
   extraction: Object.keys(extractionConfigShape),
+  chunking: Object.keys(chunkingConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

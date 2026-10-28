@@ -207,4 +207,32 @@ describe('indexer moodle:* CLI over HTTP', () => {
     expect(result.stdout).not.toContain('exfiltrate');
     expectNoToken(result);
   });
+
+  it('chunk:test chunks a Book chapter and prints no chunk text', async () => {
+    const result = await runIndexer([
+      'chunk:test',
+      '--course-id',
+      '12',
+      '--resource-id',
+      '701:chapter:11',
+      '--json',
+    ]);
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      status: string;
+      resource: { resourceType: string };
+      chunks: { chunkNumber: number; tokenCount: number; headingPath: string[] }[];
+    };
+    expect(parsed.status).toBe('chunked');
+    expect(parsed.resource.resourceType).toBe('moodle-book-chapter');
+    expect(parsed.chunks).toEqual([
+      expect.objectContaining({
+        chunkNumber: 1,
+        headingPath: ['Skin Analysis Handbook', 'Introduction'],
+      }),
+    ]);
+    expect(result.stdout).not.toContain('explains how skin analysis is recorded');
+    expect(result.stderr).not.toContain('explains how skin analysis is recorded');
+    expectNoToken(result);
+  });
 });
