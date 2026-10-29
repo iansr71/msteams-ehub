@@ -65,7 +65,7 @@ describe.skipIf(!enabled)('Azure AI Search (live)', () => {
     });
   });
 
-  it('creates, validates, indexes, searches with security trimming and deletes', async () => {
+  it('creates, validates, indexes, searches within authorised courses and deletes', async () => {
     expect((await client.createOrUpdateIndex()).outcome).toBe('created');
     expect((await client.validateIndexSchema()).status).toBe('match');
 
@@ -79,10 +79,9 @@ describe.skipIf(!enabled)('Azure AI Search (live)', () => {
       }),
       makeSearchDocument({
         seed: 'live-3',
-        content: 'Aftercare only for another user.',
-        contentVector: vector('Aftercare only for another user.'),
-        allowedUserIds: ['user-2'],
-        allowedGroupIds: [],
+        content: 'Aftercare in a course the caller is not authorised for.',
+        contentVector: vector('Aftercare in a course the caller is not authorised for.'),
+        courseId: 99,
       }),
     ];
     const report = await client.uploadChunks(documents);
@@ -95,7 +94,7 @@ describe.skipIf(!enabled)('Azure AI Search (live)', () => {
       hits = (
         await client.search({
           tenantId: 'tenant-1',
-          principals: { userIds: ['user-1'], groupIds: [] },
+          authorizedCourseIds: [12],
           text: 'aftercare',
           vector: vector('aftercare'),
           top: 10,
@@ -109,8 +108,10 @@ describe.skipIf(!enabled)('Azure AI Search (live)', () => {
       courseId: 12,
       resourceId: '701:chapter:11',
     });
-    expect(deletion.matched).toBe(3);
+    expect(deletion.matched).toBe(2);
     expect(deletion.failed).toEqual([]);
+    const otherCourse = await client.deleteChunksByCourse({ tenantId: 'tenant-1', courseId: 99 });
+    expect(otherCourse.matched).toBe(1);
 
     const health = await client.healthCheck();
     expect(health.serviceReachable).toBe(true);

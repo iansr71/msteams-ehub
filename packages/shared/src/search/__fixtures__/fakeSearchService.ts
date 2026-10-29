@@ -106,6 +106,11 @@ export function matchesFilter(document: Json, filter: string | undefined): boole
   if (courses.length > 0) {
     checks.push((doc) => courses.includes(Number(doc['courseId'])));
   }
+  const types = new RegExp(`search\\.in\\(resourceType, ${QUOTED}, ','\\)`).exec(filter);
+  if (types?.[1] !== undefined) {
+    const allowed = new Set(unquote(types[1]).split(','));
+    checks.push((doc) => allowed.has(String(doc['resourceType'])));
+  }
   if (filter.includes('isActive eq true')) {
     checks.push((doc) => doc['isActive'] === true);
   }
@@ -365,6 +370,8 @@ export class FakeSearchService {
       top?: number;
       orderby?: string;
       queryType?: string;
+      search?: string;
+      vectorQueries?: unknown[];
     };
     const fields = index.definition['fields'] as Json[];
     const retrievable = new Set(
@@ -379,6 +386,26 @@ export class FakeSearchService {
     let matches = [...(this.documents.get(name)?.values() ?? [])].filter((document) =>
       matchesFilter(document, body.filter),
     );
+    // Crude relevance for tests: the number of distinct query words (3+ letters) found in the
+    // title or content. Text-only queries return matching documents only, as Azure's default
+    // "any" search mode does; queries with a vector part return every filtered document.
+    const terms = new Set(
+      (body.search !== undefined && body.search !== '*' ? body.search.toLowerCase() : '')
+        .split(/[^a-z0-9]+/)
+        .filter((term) => term.length >= 3),
+    );
+    const relevance = new Map<Json, number>();
+    if (terms.size > 0) {
+      for (const document of matches) {
+        const haystack =
+          `${String(document['title'])} ${String(document['content'])}`.toLowerCase();
+        relevance.set(document, [...terms].filter((term) => haystack.includes(term)).length);
+      }
+      if (body.vectorQueries === undefined) {
+        matches = matches.filter((document) => (relevance.get(document) ?? 0) > 0);
+      }
+      matches = matches.sort((a, b) => (relevance.get(b) ?? 0) - (relevance.get(a) ?? 0));
+    }
     if (body.orderby === 'id asc') {
       matches = matches.sort((a, b) => (String(a['id']) < String(b['id']) ? -1 : 1));
     }
@@ -388,7 +415,7 @@ export class FakeSearchService {
         projected[field] = document[field] ?? null;
       }
       return {
-        '@search.score': 1 / (position + 1),
+        '@search.score': relevance.get(document) ?? 1 / (position + 1),
         ...(body.queryType === 'semantic' ? { '@search.rerankerScore': 3 - position * 0.1 } : {}),
         ...projected,
       };

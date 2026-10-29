@@ -6,4 +6,5 @@ export * from './factory.js';
 export * from './http.js';
 export * from './indexDefinition.js';
 export * from './odata.js';
+export * from './query.js';
 export * from './schemaComparison.js';

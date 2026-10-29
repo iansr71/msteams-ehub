@@ -1,0 +1,29 @@
+[
+  {
+    "id": "case-001",
+    "question": "How often should a client reapply sunscreen after a chemical peel?",
+    "authorizedCourseIds": ["12"],
+    "expectedCourseIds": ["12"],
+    "expectedResourceIds": ["701:chapter:11"],
+    "forbiddenResourceIds": [],
+    "notes": "TEMPLATE: replace with a real E-Hub question, course and resource (see docs/retrieval.md)."
+  },
+  {
+    "id": "case-002",
+    "question": "What eye protection is required during laser treatments?",
+    "authorizedCourseIds": ["12"],
+    "expectedCourseIds": ["12"],
+    "expectedResourceIds": [],
+    "forbiddenResourceIds": ["801"],
+    "notes": "TEMPLATE: leak check. The answer lives in course 13 (activity 801), which this user may not read, so it must never be retrieved."
+  },
+  {
+    "id": "case-003",
+    "question": "What eye protection is required during laser treatments?",
+    "authorizedCourseIds": ["12", "13"],
+    "expectedCourseIds": ["13"],
+    "expectedResourceIds": ["801"],
+    "forbiddenResourceIds": [],
+    "notes": "TEMPLATE: the same question for a user who may read course 13."
+  }
+]

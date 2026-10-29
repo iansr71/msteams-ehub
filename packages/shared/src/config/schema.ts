@@ -201,6 +201,35 @@ export const chunkingConfigShape = {
   CHUNK_TOKENIZER: z.enum(CHUNK_TOKENIZERS).default(CHUNKING_DEFAULTS.tokenizer),
 };
 
+export const RETRIEVAL_DEFAULTS = {
+  topK: 8,
+  maxChunksPerResource: 3,
+  candidateCount: 24,
+} as const;
+
+const optionalDecimal = (min: number, max: number) =>
+  z.coerce
+    .number({ message: 'Must be a number.' })
+    .min(min, { message: `Must be between ${String(min)} and ${String(max)}.` })
+    .max(max, { message: `Must be between ${String(min)} and ${String(max)}.` })
+    .optional();
+
+/*
+ * Retrieval settings. Active-content filtering is deliberately not a setting: inactive chunks
+ * are never retrieved (see docs/retrieval.md).
+ */
+export const retrievalConfigShape = {
+  RETRIEVAL_TOP_K: boundedInteger(1, 50, RETRIEVAL_DEFAULTS.topK),
+  RETRIEVAL_MAX_CHUNKS_PER_RESOURCE: boundedInteger(1, 50, RETRIEVAL_DEFAULTS.maxChunksPerResource),
+  /** Results fetched before the per-resource cap and thresholds are applied. */
+  RETRIEVAL_CANDIDATE_COUNT: boundedInteger(1, 50, RETRIEVAL_DEFAULTS.candidateCount),
+  RETRIEVAL_SEMANTIC_RANKING: booleanFlag(true),
+  /** Minimum @search.score; its scale depends on the query mode (see docs/retrieval.md). */
+  RETRIEVAL_MIN_SCORE: optionalDecimal(0, 1_000_000),
+  /** Minimum semantic reranker score (0-4); applies only when semantic ranking ran. */
+  RETRIEVAL_MIN_RERANKER_SCORE: optionalDecimal(0, 4),
+};
+
 export const observabilityConfigShape = {
   APPLICATIONINSIGHTS_CONNECTION_STRING: z
     .string()
@@ -243,6 +272,17 @@ export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).supe
   },
 );
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
+export const retrievalConfigSchema = defineConfigSchema(retrievalConfigShape).superRefine(
+  (config, ctx) => {
+    if (config.RETRIEVAL_CANDIDATE_COUNT < config.RETRIEVAL_TOP_K) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['RETRIEVAL_CANDIDATE_COUNT'],
+        message: 'Must be at least RETRIEVAL_TOP_K.',
+      });
+    }
+  },
+);
 
 const URL_KEY_PATTERN = /_(?:URL|ENDPOINT)$/;
 
@@ -274,6 +314,7 @@ export const applicationConfigSchema = defineConfigSchema({
   ...azureSearchConfigShape,
   ...azureOpenAIConfigShape,
   ...azureIdentityConfigShape,
+  ...retrievalConfigShape,
   ...observabilityConfigShape,
 });
 
@@ -283,6 +324,7 @@ export type AzureSearchConfig = z.output<typeof azureSearchConfigSchema>;
 export type AzureOpenAIConfig = z.output<typeof azureOpenAIConfigSchema>;
 export type AzureIdentityConfig = z.output<typeof azureIdentityConfigSchema>;
 export type ExtractionConfig = z.output<typeof extractionConfigSchema>;
+export type RetrievalConfig = z.output<typeof retrievalConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -296,6 +338,7 @@ export const CONFIG_FEATURES = {
   azureIdentity: azureIdentityConfigSchema,
   extraction: extractionConfigSchema,
   chunking: chunkingConfigSchema,
+  retrieval: retrievalConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -310,5 +353,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   azureIdentity: Object.keys(azureIdentityConfigShape),
   extraction: Object.keys(extractionConfigShape),
   chunking: Object.keys(chunkingConfigShape),
+  retrieval: Object.keys(retrievalConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

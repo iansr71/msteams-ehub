@@ -75,3 +75,19 @@ compatible changes, and only when asked (`--apply-compatible-changes`, guarded b
 ETag). Incompatible differences stop with migration guidance: a new versioned index is built
 and switched to, and the old one is deleted by a person. There is no delete command, because
 deleting the live index removes search for every user until a full re-index finishes.
+
+## Search access is scoped by authorised course, not per-user lists (phase 7)
+
+Phase 6 made `search()` require user or group principals matched against `allowedUserIds` /
+`allowedGroupIds`. Prompts 9 and 14 define authorisation as the user's authorised Moodle
+courses, applied as a course filter inside the search request. Per-user lists would also mean
+rewriting every chunk of a course whenever an enrolment changes. Phase 7 therefore requires a
+non-empty authorised course list on every query and refuses requested courses outside it; the
+access-list fields remain in the index as an optional extra restriction. Under the phase 6
+design, every real search would have returned nothing because nothing fills those lists.
+
+## Inactive content is never retrievable (phase 7)
+
+`isActive eq true` is part of every query filter and is not a setting, although Prompt 7 asks
+for all retrieval settings to be configurable: its explicit rule that inactive content must not
+be retrieved takes precedence.

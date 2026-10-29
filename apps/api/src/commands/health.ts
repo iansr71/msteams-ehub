@@ -15,8 +15,9 @@ export const API_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
   {
     feature: 'azureSearch',
     requirement: 'optional',
-    missingNote: 'Not required until retrieval is implemented (phase 7).',
+    missingNote: 'Needed for retrieval (the retrieve and evaluation commands).',
   },
+  { feature: 'retrieval', requirement: 'optional' },
   {
     feature: 'azureOpenAI',
     requirement: 'optional',

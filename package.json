@@ -21,7 +21,8 @@
     "test:integration": "vitest run --project integration",
     "test:security": "vitest run --project security",
     "api": "pnpm --silent --filter @ehub/api run cli",
-    "indexer": "pnpm --silent --filter @ehub/indexer run cli"
+    "indexer": "pnpm --silent --filter @ehub/indexer run cli",
+    "evaluation": "pnpm --silent --filter @ehub/api run evaluation"
   },
   "devDependencies": {
     "@ehub/moodle-client": "workspace:*",

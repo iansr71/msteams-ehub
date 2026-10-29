@@ -1,4 +1,6 @@
+export * from './cli/args.js';
 export * from './cli/runCommandLine.js';
+export * from './cli/terminalText.js';
 export * from './config/envFile.js';
 export * from './config/load.js';
 export * from './config/schema.js';

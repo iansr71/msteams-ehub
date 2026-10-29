@@ -47,17 +47,13 @@ export interface SearchPrincipals {
 
 export class MissingPrincipalsError extends Error {
   constructor() {
-    super('A search must name at least one user or group principal.');
+    super('A principal restriction must name at least one user or group.');
     this.name = 'MissingPrincipalsError';
   }
 }
 
-/**
- * Restricts results to one tenant, active chunks, and chunks that list one of the caller's
- * principals. Throws rather than returning an unrestricted filter when no principal is given.
- */
-export function buildSecurityFilter(tenantId: string, principals: SearchPrincipals): string {
-  const tenant = assertIdentifier(tenantId, 'tenant ID');
+/** `allowedUserIds/any(...) or allowedGroupIds/any(...)`; throws when both lists are empty. */
+export function buildPrincipalFilter(principals: SearchPrincipals): string {
   const clauses: string[] = [];
   if (principals.userIds.length > 0) {
     clauses.push(anyIn('allowedUserIds', principals.userIds, 'user ID'));
@@ -68,14 +64,50 @@ export function buildSecurityFilter(tenantId: string, principals: SearchPrincipa
   if (clauses.length === 0) {
     throw new MissingPrincipalsError();
   }
-  return `tenantId eq ${odataString(tenant)} and isActive eq true and (${clauses.join(' or ')})`;
+  return `(${clauses.join(' or ')})`;
 }
 
+export const MAX_FILTER_COURSES = 1000;
+
+function courseIdLiteral(value: number): string {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new InvalidFilterValueError('course ID');
+  }
+  return String(value);
+}
+
+/**
+ * `(courseId eq 1 or courseId eq 2)`. search.in only applies to string fields, so integer
+ * course IDs are combined with `or`.
+ */
 export function buildCourseFilter(courseIds: readonly number[]): string {
-  if (courseIds.length === 0) {
+  if (courseIds.length === 0 || courseIds.length > MAX_FILTER_COURSES) {
     throw new InvalidFilterValueError('course list');
   }
-  return `(${courseIds.map((id) => `courseId eq ${odataInteger(id, 'course ID')}`).join(' or ')})`;
+  const unique = [...new Set(courseIds.map(courseIdLiteral))];
+  return `(${unique.map((id) => `courseId eq ${id}`).join(' or ')})`;
+}
+
+/** `search.in(field, 'a,b', ',')` over values already checked against an allow-list. */
+export function buildStringInFilter(
+  field: 'resourceType',
+  values: readonly string[],
+  allowed: ReadonlySet<string>,
+): string {
+  if (values.length === 0) {
+    throw new InvalidFilterValueError(field);
+  }
+  for (const value of values) {
+    if (!allowed.has(value)) {
+      throw new InvalidFilterValueError(field);
+    }
+  }
+  return `search.in(${field}, ${odataString([...new Set(values)].join(','))}, ',')`;
+}
+
+/** Every query's base restriction: one tenant and active chunks only. */
+export function buildTenantFilter(tenantId: string): string {
+  return `tenantId eq ${odataString(assertIdentifier(tenantId, 'tenant ID'))} and isActive eq true`;
 }
 
 export interface DocumentScope {

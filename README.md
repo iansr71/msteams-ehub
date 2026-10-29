@@ -71,6 +71,8 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm indexer search:create-index`                              | Creates the index if missing; never deletes; `--apply-compatible-changes`, `--json`      |
 | `pnpm indexer search:validate-index`                            | Compares the deployed index schema with this version; exit 1 unless it matches           |
 | `pnpm indexer search:health`                                    | Service reachability, index existence, document count and storage; `--json`              |
+| `pnpm api retrieve --question <text> --course-id <id[,id]>`     | Filtered retrieval: ranks, scores, metadata; `--excerpts`, `--json` (see docs/retrieval) |
+| `pnpm evaluation retrieval --file <cases.json>`                 | Runs retrieval evaluation cases; hit@1/3/5 and MRR; exit 1 if any case fails             |
 
 Validation gate used before every phase is committed:
 
@@ -86,7 +88,7 @@ pnpm -s api health
 ```
 
 The report lists each configuration group (`runtime`, `moodle`, `azureSearch`, `azureOpenAI`,
-`azureIdentity`, `observability`) with `pass`, `warn` or `fail`. It shows variable **names** and
+`azureIdentity`, `retrieval`, `observability`) with `pass`, `warn` or `fail`. It shows variable **names** and
 problems, never values. Exit codes: `0` healthy or warnings only, `1` a failed check, `2` usage
 error. Logs go to stderr as JSON lines; stdout carries only the report.
 
@@ -134,6 +136,12 @@ Validated with Zod in `packages/shared/src/config`. Empty values are treated as 
 | `CHUNK_MIN_TOKENS`                      | chunking      | Optional; default 100                                  |
 | `CHUNK_OVERLAP_TOKENS`                  | chunking      | Optional; default 125                                  |
 | `CHUNK_TOKENIZER`                       | chunking      | Optional; `cl100k_base` (default) or `o200k_base`      |
+| `RETRIEVAL_TOP_K`                       | retrieval     | Optional; 1–50, default 8                              |
+| `RETRIEVAL_MAX_CHUNKS_PER_RESOURCE`     | retrieval     | Optional; 1–50, default 3                              |
+| `RETRIEVAL_CANDIDATE_COUNT`             | retrieval     | Optional; 1–50, default 24, at least top K             |
+| `RETRIEVAL_SEMANTIC_RANKING`            | retrieval     | Optional; `true` (default) or `false`                  |
+| `RETRIEVAL_MIN_SCORE`                   | retrieval     | Optional; off by default                               |
+| `RETRIEVAL_MIN_RERANKER_SCORE`          | retrieval     | Optional; 0–4, off by default                          |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | observability | Secret, optional                                       |
 
 In production every `*_URL` / `*_ENDPOINT` variable must use https.

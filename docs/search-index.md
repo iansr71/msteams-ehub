@@ -59,21 +59,28 @@ ambiguous.
 
 ## Security trimming
 
-`search()` builds the filter itself and cannot be called without it:
+`search()` builds the filter itself (`buildSearchRequest` in `query.ts`) and cannot be called
+without an authorised course list:
 
 ```text
-tenantId eq '<tenant>' and isActive eq true and
-  (allowedUserIds/any(v: search.in(v, '<user ids>', ',')) or
-   allowedGroupIds/any(v: search.in(v, '<group ids>', ',')))
+tenantId eq '<tenant>' and isActive eq true and (courseId eq 12 or courseId eq 15)
+  [and (allowedUserIds/any(...) or allowedGroupIds/any(...))]   optional, when principals given
+  [and search.in(resourceType, 'pdf,docx', ',')]                 optional resource-type filter
 ```
 
-- No principals → `MissingPrincipalsError` before any request (fail closed).
-- User, group and tenant IDs must match `^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`, so they cannot
-  contain the comma delimiter or a quote. Other string values (resource IDs) have quotes doubled.
-- Vector queries use `vectorFilterMode: preFilter`, so unauthorised chunks cannot push
+- Access is decided per course, matching phase 14: the caller's authorised Moodle course IDs
+  are required and non-empty (`SearchScopeError: empty_scope` before any request otherwise).
+  A requested course outside the authorised set is refused (`course_not_authorized`).
+- Phase 6 originally required per-user/group principals instead. That was changed in phase 7:
+  the access-list fields stay in the index as an optional extra restriction, but nothing
+  populates them yet, and requiring them would have made every real search return nothing.
+- Course IDs must be positive integers; user, group and tenant IDs must match
+  `^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`; resource types must be one of the extractor types.
+  Other string values (resource IDs in deletions) have quotes doubled.
+- Vector queries use `vectorFilterMode: preFilter`, so chunks outside the scope cannot push
   authorised ones out of the nearest-neighbour results.
-- Results are validated; a result from another tenant fails the whole query.
-- Chunks with empty access lists match nobody. Phase 14 fills the lists from Moodle enrolments.
+- Results are validated; a result from another tenant, from a course outside the scope, or
+  marked inactive fails the whole query.
 
 ## Authentication
 

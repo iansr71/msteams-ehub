@@ -29,22 +29,13 @@ import {
   type Sleep,
 } from './http.js';
 import {
-  RETRIEVABLE_FIELD_NAMES,
   SEARCH_API_VERSION,
   SEARCH_SCHEMA_VERSION,
-  SEMANTIC_CONFIGURATION_NAME,
-  VECTOR_FIELD_NAME,
   buildIndexDefinition,
   type SearchIndexDefinition,
 } from './indexDefinition.js';
-import {
-  buildCourseFilter,
-  buildScopeFilter,
-  buildSecurityFilter,
-  odataString,
-  type DocumentScope,
-  type SearchPrincipals,
-} from './odata.js';
+import { buildScopeFilter, odataString, type DocumentScope } from './odata.js';
+import { buildSearchRequest, type SearchQuery, type SearchRequestPlan } from './query.js';
 import {
   buildInPlaceUpdate,
   compareIndexDefinitions,
@@ -123,21 +114,6 @@ export interface DeletionReport extends IndexingReport {
   readonly matched: number;
 }
 
-export interface SearchQuery {
-  readonly tenantId: string;
-  /** The asking user's principals; results are restricted to chunks listing one of them. */
-  readonly principals: SearchPrincipals;
-  /** Keyword/semantic query text. At least one of `text` and `vector` is required. */
-  readonly text?: string;
-  /** Query embedding for vector similarity; must have the configured dimensions. */
-  readonly vector?: readonly number[];
-  readonly top?: number;
-  /** Optional further restriction to these courses (within the caller's permissions). */
-  readonly courseIds?: readonly number[];
-  /** Use semantic ranking when the index has it and `text` is given. Default true. */
-  readonly semantic?: boolean;
-}
-
 export interface SearchHit {
   readonly document: RetrievedDocument;
   readonly score: number;
@@ -146,6 +122,7 @@ export interface SearchHit {
 
 export interface SearchResults {
   readonly hits: readonly SearchHit[];
+  readonly mode: SearchRequestPlan['mode'];
   readonly semanticApplied: boolean;
   readonly durationMs: number;
 }
@@ -224,7 +201,6 @@ export interface RestSearchIndexClientOptions {
 
 export const AZURE_MAX_BATCH_DOCUMENTS = 1000;
 export const DEFAULT_MAX_BATCH_BYTES = 15 * 1024 * 1024;
-export const MAX_SEARCH_TOP = 50;
 const KEY_PAGE_SIZE = 1000;
 const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** Per-document statuses Azure documents as transient. */
@@ -791,60 +767,12 @@ export class RestSearchIndexClient implements SearchIndexClient {
 
   async search(query: SearchQuery, options: SearchCallOptions = {}): Promise<SearchResults> {
     const started = Date.now();
-    // Built first so a query without principals fails before any network traffic.
-    const filters = [buildSecurityFilter(query.tenantId, query.principals)];
-    if (query.courseIds !== undefined) {
-      filters.push(buildCourseFilter(query.courseIds));
-    }
-    const top = query.top ?? 5;
-    if (!Number.isInteger(top) || top < 1 || top > MAX_SEARCH_TOP) {
-      throw new SearchServiceError(`top must be between 1 and ${String(MAX_SEARCH_TOP)}.`, {
-        category: 'invalid_request',
-        operation: 'search',
-      });
-    }
-    const text = query.text?.trim();
-    if ((text === undefined || text === '') && query.vector === undefined) {
-      throw new SearchServiceError('A search needs query text, a query vector, or both.', {
-        category: 'invalid_request',
-        operation: 'search',
-      });
-    }
-    if (
-      query.vector !== undefined &&
-      (query.vector.length !== this.#options.vectorDimensions ||
-        !query.vector.every((value) => Number.isFinite(value)))
-    ) {
-      throw new SearchServiceError('The query vector does not match the index dimensions.', {
-        category: 'invalid_request',
-        operation: 'search',
-      });
-    }
-    const semantic =
-      this.#options.semanticEnabled &&
-      query.semantic !== false &&
-      text !== undefined &&
-      text !== '';
-
-    const body: Record<string, unknown> = {
-      search: text === undefined || text === '' ? '*' : text,
-      filter: filters.join(' and '),
-      select: RETRIEVABLE_FIELD_NAMES.join(','),
-      top,
-      ...(semantic
-        ? { queryType: 'semantic', semanticConfiguration: SEMANTIC_CONFIGURATION_NAME }
-        : { queryType: 'simple' }),
-      ...(query.vector === undefined
-        ? {}
-        : {
-            vectorQueries: [
-              { kind: 'vector', vector: query.vector, fields: VECTOR_FIELD_NAME, k: top },
-            ],
-            // Security trimming before nearest-neighbour selection, so unauthorised chunks can
-            // never displace authorised ones from the top k.
-            vectorFilterMode: 'preFilter',
-          }),
-    };
+    // Built first so an unscoped or malformed query fails before any network traffic.
+    const plan = buildSearchRequest(query, {
+      vectorDimensions: this.#options.vectorDimensions,
+      semanticEnabled: this.#options.semanticEnabled,
+    });
+    const { body, semantic } = plan;
     const result = await this.#request({
       operation: 'search',
       method: 'POST',
@@ -858,7 +786,12 @@ export class RestSearchIndexClient implements SearchIndexClient {
     const hits: SearchHit[] = response.value.map((raw) => {
       const document = retrievedDocumentSchema.safeParse(raw);
       // A document that does not match the schema cannot be cited safely.
-      if (!document.success || document.data.tenantId !== query.tenantId) {
+      if (
+        !document.success ||
+        document.data.tenantId !== query.tenantId ||
+        !plan.effectiveCourseIds.has(document.data.courseId) ||
+        !document.data.isActive
+      ) {
         throw invalidResponse('search');
       }
       return {
@@ -871,11 +804,12 @@ export class RestSearchIndexClient implements SearchIndexClient {
     this.#logger.debug('Search completed.', {
       hits: hits.length,
       semantic,
-      vector: query.vector !== undefined,
+      mode: plan.mode,
       durationMs,
     });
     return {
       hits,
+      mode: plan.mode,
       semanticApplied:
         semantic && (response['@search.semanticPartialResponseReason'] ?? undefined) === undefined,
       durationMs,

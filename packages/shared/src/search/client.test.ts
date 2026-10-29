@@ -53,7 +53,7 @@ function setup(overrides: Partial<RestSearchIndexClientOptions> = {}) {
   return { service, client, logLines, sleeps };
 }
 
-const principals = { userIds: ['user-1'], groupIds: [] };
+const scope = { tenantId: 'tenant-1', authorizedCourseIds: [12] };
 
 describe('RestSearchIndexClient index management', () => {
   it('creates a missing index with a create-only request', async () => {
@@ -340,70 +340,121 @@ describe('RestSearchIndexClient search', () => {
     const context = setup();
     await context.client.createOrUpdateIndex();
     context.service.seed(INDEX, [
-      makeSearchDocument({ seed: 'mine' }),
-      makeSearchDocument({ seed: 'group', allowedUserIds: [], allowedGroupIds: ['group-7'] }),
-      makeSearchDocument({ seed: 'other', allowedUserIds: ['user-2'], allowedGroupIds: [] }),
-      makeSearchDocument({ seed: 'nobody', allowedUserIds: [], allowedGroupIds: [] }),
+      makeSearchDocument({ seed: 'c12-a' }),
+      makeSearchDocument({ seed: 'c12-b', resourceId: '701:page', resourceType: 'moodle-page' }),
+      makeSearchDocument({ seed: 'c12-acl', allowedUserIds: ['user-2'], allowedGroupIds: [] }),
+      makeSearchDocument({ seed: 'c13', courseId: 13, courseName: 'Lasers' }),
       makeSearchDocument({ seed: 'inactive', isActive: false }),
       makeSearchDocument({ seed: 'tenant', tenantId: 'tenant-2' }),
     ]);
     return context;
   }
 
-  it('returns only chunks the caller may see, without access lists or vectors', async () => {
+  const lastBody = (service: FakeSearchService): Record<string, unknown> =>
+    JSON.parse(service.requests.at(-1)?.body ?? '{}') as Record<string, unknown>;
+
+  it('returns active chunks from authorised courses only, without access lists or vectors', async () => {
     const { client, service } = await seeded();
-    const results = await client.search({
-      tenantId: 'tenant-1',
-      principals: { userIds: ['user-1'], groupIds: ['group-7'] },
-      text: 'aftercare',
-      top: 10,
-    });
-    expect(results.hits).toHaveLength(2);
+    const results = await client.search({ ...scope, text: 'aftercare', top: 10 });
+    expect(results.hits.map((hit) => hit.document.courseId)).toEqual([12, 12, 12]);
     expect(results.semanticApplied).toBe(true);
+    expect(results.mode).toBe('keyword');
     expect(results.hits[0]?.rerankerScore).toBeTypeOf('number');
     for (const hit of results.hits) {
       expect(hit.document).not.toHaveProperty('allowedUserIds');
       expect(hit.document).not.toHaveProperty('contentVector');
     }
-    const body = JSON.parse(service.requests.at(-1)?.body ?? '{}') as Record<string, unknown>;
-    expect(body).toMatchObject({ queryType: 'semantic', semanticConfiguration: 'ehub-semantic' });
-    expect(body['filter']).toContain("tenantId eq 'tenant-1' and isActive eq true");
+    expect(lastBody(service)).toMatchObject({
+      queryType: 'semantic',
+      semanticConfiguration: 'ehub-semantic',
+      filter: "tenantId eq 'tenant-1' and isActive eq true and (courseId eq 12)",
+    });
   });
 
-  it('fails closed before any request when the caller has no principals', async () => {
+  it('never returns another course, even when the other course matches better', async () => {
+    const { client } = await seeded();
+    const results = await client.search({
+      tenantId: 'tenant-1',
+      authorizedCourseIds: [13],
+      text: 'aftercare',
+      top: 10,
+    });
+    expect(results.hits.map((hit) => hit.document.courseId)).toEqual([13]);
+  });
+
+  it('fails closed before any request when no courses are authorised', async () => {
     const { client, service } = await seeded();
     const before = service.requests.length;
     await expect(
-      client.search({ tenantId: 'tenant-1', principals: { userIds: [], groupIds: [] }, text: 'x' }),
+      client.search({ tenantId: 'tenant-1', authorizedCourseIds: [], text: 'x' }),
+    ).rejects.toMatchObject({ name: 'SearchScopeError', code: 'empty_scope' });
+    await expect(client.search({ ...scope, courseIds: [13], text: 'x' })).rejects.toMatchObject({
+      code: 'course_not_authorized',
+    });
+    await expect(
+      client.search({ ...scope, principals: { userIds: [], groupIds: [] }, text: 'x' }),
     ).rejects.toThrow(MissingPrincipalsError);
     expect(service.requests.length).toBe(before);
   });
 
-  it('pre-filters vector queries and checks the vector size', async () => {
+  it('adds optional principal and resource-type restrictions to the filter', async () => {
     const { client, service } = await seeded();
-    const results = await client.search({
-      tenantId: 'tenant-1',
-      principals,
-      vector: placeholderVector('aftercare', TEST_DIMENSIONS),
-      courseIds: [12],
+    const byPrincipal = await client.search({
+      ...scope,
+      principals: { userIds: ['user-2'], groupIds: [] },
+      text: 'aftercare',
+      top: 10,
     });
-    expect(results.hits).toHaveLength(1);
-    expect(results.semanticApplied).toBe(false);
-    const body = JSON.parse(service.requests.at(-1)?.body ?? '{}') as Record<string, unknown>;
-    expect(body).toMatchObject({ vectorFilterMode: 'preFilter', queryType: 'simple' });
-    expect(body['filter']).toContain('(courseId eq 12)');
-    await expect(
-      client.search({ tenantId: 'tenant-1', principals, vector: [1, 2] }),
-    ).rejects.toMatchObject({ category: 'invalid_request' });
-    await expect(client.search({ tenantId: 'tenant-1', principals })).rejects.toMatchObject({
-      category: 'invalid_request',
+    expect(byPrincipal.hits).toHaveLength(1);
+    const byType = await client.search({
+      ...scope,
+      resourceTypes: ['moodle-page'],
+      text: 'aftercare',
+      top: 10,
     });
-    await expect(
-      client.search({ tenantId: 'tenant-1', principals, text: 'x', top: 51 }),
-    ).rejects.toMatchObject({ category: 'invalid_request' });
+    expect(byType.hits.map((hit) => hit.document.resourceType)).toEqual(['moodle-page']);
+    expect(lastBody(service)['filter']).toBe(
+      "tenantId eq 'tenant-1' and isActive eq true and (courseId eq 12) and search.in(resourceType, 'moodle-page', ',')",
+    );
   });
 
-  it("rejects a response containing another tenant's document", async () => {
+  it('pre-filters vector queries, omits search text for vector-only, and checks the vector', async () => {
+    const { client, service } = await seeded();
+    const results = await client.search({
+      ...scope,
+      vector: placeholderVector('aftercare', TEST_DIMENSIONS),
+      vectorK: 20,
+    });
+    expect(results.mode).toBe('vector');
+    expect(results.semanticApplied).toBe(false);
+    const body = lastBody(service);
+    expect(body).toMatchObject({ vectorFilterMode: 'preFilter', queryType: 'simple' });
+    expect(body).not.toHaveProperty('search');
+    expect(body['vectorQueries']).toEqual([
+      expect.objectContaining({ kind: 'vector', fields: 'contentVector', k: 20 }),
+    ]);
+    const hybrid = await client.search({
+      ...scope,
+      text: 'aftercare',
+      vector: placeholderVector('aftercare', TEST_DIMENSIONS),
+    });
+    expect(hybrid.mode).toBe('hybrid');
+    expect(lastBody(service)).toMatchObject({ search: 'aftercare', queryType: 'semantic' });
+    for (const bad of [
+      { ...scope, vector: [1, 2] },
+      { ...scope },
+      { ...scope, text: 'x', top: 51 },
+      { ...scope, text: 'x'.repeat(1001) },
+    ]) {
+      await expect(client.search(bad)).rejects.toMatchObject({ code: 'invalid_query' });
+    }
+  });
+
+  it.each([
+    ['another tenant', { tenantId: 'tenant-2' }],
+    ['an unauthorised course', { courseId: 13 }],
+    ['inactive content', { isActive: false }],
+  ])('rejects a response containing %s', async (_label, override) => {
     const { client, service } = await seeded();
     service.scriptedResponses.push({
       status: 200,
@@ -411,7 +462,7 @@ describe('RestSearchIndexClient search', () => {
         value: [
           {
             '@search.score': 1,
-            ...makeSearchDocument({ tenantId: 'tenant-2' }),
+            ...makeSearchDocument(override),
             contentVector: undefined,
             allowedUserIds: undefined,
             allowedGroupIds: undefined,
@@ -419,17 +470,18 @@ describe('RestSearchIndexClient search', () => {
         ],
       }),
     });
-    await expect(
-      client.search({ tenantId: 'tenant-1', principals, text: 'x' }),
-    ).rejects.toMatchObject({ category: 'invalid_response' });
+    await expect(client.search({ ...scope, text: 'x' })).rejects.toMatchObject({
+      category: 'invalid_response',
+    });
   });
 
   it('does not follow redirects', async () => {
     const { client, service } = await seeded();
     service.scriptedResponses.push({ status: 307, headers: { location: 'https://evil.test/' } });
-    await expect(
-      client.search({ tenantId: 'tenant-1', principals, text: 'x' }),
-    ).rejects.toMatchObject({ category: 'invalid_response', httpStatus: 307 });
+    await expect(client.search({ ...scope, text: 'x' })).rejects.toMatchObject({
+      category: 'invalid_response',
+      httpStatus: 307,
+    });
   });
 
   it('asks fetch not to follow redirects, which would resend the key to another host', async () => {
@@ -454,7 +506,7 @@ describe('RestSearchIndexClient search', () => {
       }),
     });
     const failure = await client
-      .search({ tenantId: 'tenant-1', principals, text: 'my secret question' })
+      .search({ ...scope, text: 'my secret question' })
       .catch((error: unknown) => error);
     expect((failure as Error).message).not.toContain('secret question');
   });

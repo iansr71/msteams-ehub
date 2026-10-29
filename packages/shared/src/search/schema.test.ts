@@ -12,8 +12,10 @@ import {
   InvalidFilterValueError,
   MissingPrincipalsError,
   buildCourseFilter,
+  buildPrincipalFilter,
   buildScopeFilter,
-  buildSecurityFilter,
+  buildStringInFilter,
+  buildTenantFilter,
   odataString,
 } from './odata.js';
 import {
@@ -368,30 +370,43 @@ describe('OData filters', () => {
     );
   });
 
-  it('builds the security filter from validated principals', () => {
-    expect(buildSecurityFilter('tenant-1', { userIds: ['u-1'], groupIds: ['g-1', 'g-2'] })).toBe(
-      "tenantId eq 'tenant-1' and isActive eq true and (allowedUserIds/any(v: search.in(v, 'u-1', ',')) or allowedGroupIds/any(v: search.in(v, 'g-1,g-2', ',')))",
+  it('builds tenant, course and principal clauses from validated values', () => {
+    expect(buildTenantFilter('tenant-1')).toBe("tenantId eq 'tenant-1' and isActive eq true");
+    expect(buildCourseFilter([12, 13, 12])).toBe('(courseId eq 12 or courseId eq 13)');
+    expect(buildPrincipalFilter({ userIds: ['u-1'], groupIds: ['g-1', 'g-2'] })).toBe(
+      "(allowedUserIds/any(v: search.in(v, 'u-1', ',')) or allowedGroupIds/any(v: search.in(v, 'g-1,g-2', ',')))",
     );
   });
 
-  it('fails closed without principals and rejects identifiers that could alter a filter', () => {
-    expect(() => buildSecurityFilter('tenant-1', { userIds: [], groupIds: [] })).toThrow(
+  it('rejects values that could alter a filter', () => {
+    expect(() => buildPrincipalFilter({ userIds: [], groupIds: [] })).toThrow(
       MissingPrincipalsError,
     );
     for (const bad of ['a,b', "a'b", 'a b', '', 'x)']) {
-      expect(() => buildSecurityFilter('tenant-1', { userIds: [bad], groupIds: [] })).toThrow(
+      expect(() => buildPrincipalFilter({ userIds: [bad], groupIds: [] })).toThrow(
         InvalidFilterValueError,
       );
     }
-    expect(() => buildSecurityFilter("t' or '1", { userIds: ['u'], groupIds: [] })).toThrow(
-      InvalidFilterValueError,
+    expect(() => buildTenantFilter("t' or '1")).toThrow(InvalidFilterValueError);
+    for (const bad of [
+      [],
+      [0],
+      [-1],
+      [1.5],
+      [Number.NaN],
+      Array.from({ length: 1001 }, (_, i) => i + 1),
+    ]) {
+      expect(() => buildCourseFilter(bad)).toThrow(InvalidFilterValueError);
+    }
+    const allowed = new Set(['pdf', 'docx']);
+    expect(buildStringInFilter('resourceType', ['pdf', 'docx'], allowed)).toBe(
+      "search.in(resourceType, 'pdf,docx', ',')",
     );
-  });
-
-  it('validates course and scope values', () => {
-    expect(buildCourseFilter([1, 2])).toBe('(courseId eq 1 or courseId eq 2)');
-    expect(() => buildCourseFilter([])).toThrow(InvalidFilterValueError);
-    expect(() => buildCourseFilter([1.5])).toThrow(InvalidFilterValueError);
+    for (const bad of [[], ["pdf') or true or ('"], ['pdf,docx'], ['PDF']]) {
+      expect(() => buildStringInFilter('resourceType', bad, allowed)).toThrow(
+        InvalidFilterValueError,
+      );
+    }
     expect(() => buildScopeFilter({ tenantId: 'tenant-1', courseId: 12, resourceId: '' })).toThrow(
       InvalidFilterValueError,
     );
