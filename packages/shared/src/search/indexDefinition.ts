@@ -12,7 +12,7 @@ export const SEARCH_API_VERSION = '2026-04-01';
  * deployed version can be read back. A bump that changes an attribute Azure cannot change in
  * place also needs a new index name (see docs/search-index.md).
  */
-export const SEARCH_SCHEMA_VERSION = 1;
+export const SEARCH_SCHEMA_VERSION = 2;
 
 export const VECTOR_FIELD_NAME = 'contentVector';
 export const VECTOR_PROFILE_NAME = 'ehub-vector-profile';
@@ -169,6 +169,12 @@ export function buildIndexDefinition(options: IndexDefinitionOptions): SearchInd
     keyword('sourceContentHash'),
     field('modifiedAt', 'Edm.DateTimeOffset', { filterable: true, sortable: true }),
     field('indexedAt', 'Edm.DateTimeOffset', { filterable: true, sortable: true }),
+    // Schema version 2 (phase 8): how the vector was made, so unchanged chunks are not
+    // re-embedded and a model change can be found and re-indexed.
+    keyword('embeddingModel', { facetable: true }),
+    keyword('embeddingVersion', { facetable: true }),
+    integer('embeddingDimensions'),
+    field('embeddedAt', 'Edm.DateTimeOffset', { filterable: true, sortable: true }),
     keyword('extractorVersion', { facetable: true }),
     keyword('chunkerVersion', { facetable: true }),
     // Security trimming only: filterable, never returned to callers.

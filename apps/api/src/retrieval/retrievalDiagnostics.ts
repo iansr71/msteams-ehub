@@ -74,6 +74,7 @@ export function describeChunk(chunk: RetrievedChunk, options: DiagnosticOptions)
 
 export interface RetrievalDiagnosticReport {
   readonly mode: RetrievalResult['mode'];
+  readonly queryEmbeddingModel?: string;
   readonly semanticApplied: boolean;
   readonly topK: number;
   readonly candidates: number;
@@ -93,6 +94,9 @@ export class RetrievalDiagnostics {
   report(result: RetrievalResult): RetrievalDiagnosticReport {
     return {
       mode: result.mode,
+      ...(result.queryEmbeddingModel === undefined
+        ? {}
+        : { queryEmbeddingModel: result.queryEmbeddingModel }),
       semanticApplied: result.semanticApplied,
       topK: result.topK,
       candidates: result.candidates,
@@ -110,7 +114,7 @@ export class RetrievalDiagnostics {
   renderText(result: RetrievalResult): string {
     const report = this.report(result);
     const lines = [
-      `Retrieval: ${report.mode}${report.semanticApplied ? ' + semantic ranking' : ''}, ${String(report.results.length)} of top ${String(report.topK)} (${String(report.candidates)} candidates, ${String(report.droppedBelowThreshold)} below threshold, ${String(report.droppedByResourceCap)} over the per-resource cap), ${String(report.durationMs)} ms`,
+      `Retrieval: ${report.mode}${report.queryEmbeddingModel === undefined ? '' : ` (query embedded with ${report.queryEmbeddingModel})`}${report.semanticApplied ? ' + semantic ranking' : ''}, ${String(report.results.length)} of top ${String(report.topK)} (${String(report.candidates)} candidates, ${String(report.droppedBelowThreshold)} below threshold, ${String(report.droppedByResourceCap)} over the per-resource cap), ${String(report.durationMs)} ms`,
     ];
     if (report.results.length === 0) {
       lines.push('No results.');

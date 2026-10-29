@@ -88,7 +88,7 @@ describe('search:* commands', () => {
     await run('search:create-index', [], { service: missing.service });
     const valid = await run('search:validate-index', ['--json'], { service: missing.service });
     expect(valid.exitCode).toBe(0);
-    expect(JSON.parse(valid.stdout)).toMatchObject({ status: 'match', expectedSchemaVersion: 1 });
+    expect(JSON.parse(valid.stdout)).toMatchObject({ status: 'match', expectedSchemaVersion: 2 });
   });
 
   it('refuses to change an incompatible index and prints migration guidance', async () => {

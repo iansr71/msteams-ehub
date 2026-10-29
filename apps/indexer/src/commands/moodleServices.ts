@@ -8,6 +8,7 @@ import {
   type MoodleFileDownloader,
   type NormalizedMoodleBaseUrl,
 } from '@ehub/moodle-client';
+import { isEmbeddingError } from '@ehub/shared/embeddings';
 import {
   ConfigValidationError,
   EXIT_FAILURE,
@@ -118,7 +119,7 @@ export function describeFailure(error: unknown): FailureReport | undefined {
       error: {
         category: 'configuration',
         code: 'invalid_configuration',
-        message: 'Moodle configuration is missing or invalid.',
+        message: 'Configuration is missing or invalid.',
         problems: error.issues.map((issue) => `${issue.variable}: ${issue.message}`),
       },
       hint: HINTS['invalid_configuration'] ?? '',
@@ -126,6 +127,18 @@ export function describeFailure(error: unknown): FailureReport | undefined {
   }
   if (isMoodleError(error)) {
     return fromMoodleError(error);
+  }
+  // chunk:test --embed also calls the embedding service.
+  if (isEmbeddingError(error)) {
+    return {
+      status: 'error',
+      error: {
+        category: error.category,
+        code: error.serviceCode ?? error.category,
+        message: error.message,
+        ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }),
+      },
+    };
   }
   if (error instanceof CourseNotFoundError || error instanceof ResourceNotFoundError) {
     return {

@@ -1,6 +1,8 @@
 import type { CommandDefinition } from '@ehub/shared';
 
 import { createChunkTestCommand } from './chunkCommand.js';
+import { createEmbeddingCommands } from './embeddingCommands.js';
+import type { EmbeddingCommandDependencies } from './embeddingServices.js';
 import { createExtractTestCommand } from './extractCommand.js';
 import { createHealthCommand } from './health.js';
 import { createMoodleCommands } from './moodleCommands.js';
@@ -10,6 +12,7 @@ import { createSearchCommands, type SearchCommandDependencies } from './searchCo
 export interface IndexerCommandDependencies {
   readonly moodle?: MoodleCommandDependencies;
   readonly search?: SearchCommandDependencies;
+  readonly embeddings?: EmbeddingCommandDependencies;
 }
 
 export function createIndexerCommands(
@@ -21,7 +24,8 @@ export function createIndexerCommands(
     health: createHealthCommand(env),
     ...createMoodleCommands(moodle),
     'extract:test': createExtractTestCommand(moodle),
-    'chunk:test': createChunkTestCommand(moodle),
+    'chunk:test': createChunkTestCommand(moodle, dependencies.embeddings ?? { env }),
     ...createSearchCommands(dependencies.search ?? { env }),
+    ...createEmbeddingCommands(dependencies.embeddings ?? { env }),
   };
 }

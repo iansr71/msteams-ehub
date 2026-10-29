@@ -1,3 +1,4 @@
+import type { Embedding } from '@ehub/shared/embeddings';
 import { searchDocumentSchema, type SearchDocument } from '@ehub/shared/search';
 
 import type { ContentChunk } from '../pipeline/chunkMetadata.js';
@@ -22,16 +23,32 @@ export class InvalidSearchDocumentError extends Error {
 }
 
 /**
- * Maps a validated chunk and its embedding to the stored index document. `overlapTokens` is a
- * chunking diagnostic and is not stored. Throws when the embedding size does not match the
- * index, because Azure would reject the whole batch.
+ * The text embedded for a chunk: its location (resource and heading path) followed by the
+ * content. The location helps short chunks such as a list under a heading match questions
+ * about that heading; it is part of the hashed input, so a renamed heading re-embeds the chunk.
+ */
+export function buildEmbeddingText(chunk: ContentChunk): string {
+  const location: string[] = [];
+  for (const part of [chunk.resourceName, ...chunk.headingPath]) {
+    if (part.trim() !== '' && location.at(-1) !== part) {
+      location.push(part);
+    }
+  }
+  return location.length === 0 ? chunk.content : `${location.join(' > ')}\n\n${chunk.content}`;
+}
+
+/**
+ * Maps a validated chunk and its embedding to the stored index document, recording how the
+ * vector was made. `overlapTokens` is a chunking diagnostic and is not stored. Throws when the
+ * embedding size does not match the index, because Azure would reject the whole batch.
  */
 export function toSearchDocument(
   chunk: ContentChunk,
-  vector: readonly number[],
+  embedding: Pick<Embedding, 'vector' | 'metadata'>,
   expectedDimensions: number,
 ): SearchDocument {
-  if (vector.length !== expectedDimensions) {
+  const { vector, metadata } = embedding;
+  if (vector.length !== expectedDimensions || metadata.dimensions !== expectedDimensions) {
     throw new VectorDimensionError(vector.length, expectedDimensions);
   }
   const fields: Partial<ContentChunk> = { ...chunk };
@@ -41,6 +58,10 @@ export function toSearchDocument(
     id: chunk.chunkId,
     ...fields,
     contentVector: [...vector],
+    embeddingModel: metadata.modelIdentifier,
+    embeddingVersion: metadata.embeddingVersion,
+    embeddingDimensions: metadata.dimensions,
+    embeddedAt: metadata.generatedAt,
   });
   if (!parsed.success) {
     // Field paths only: Zod issues can quote the offending (document) values.

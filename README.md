@@ -71,6 +71,8 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm indexer search:create-index`                              | Creates the index if missing; never deletes; `--apply-compatible-changes`, `--json`      |
 | `pnpm indexer search:validate-index`                            | Compares the deployed index schema with this version; exit 1 unless it matches           |
 | `pnpm indexer search:health`                                    | Service reachability, index existence, document count and storage; `--json`              |
+| `pnpm indexer embeddings:health`                                | Checks the embedding deployment and that its dimensions match the search index           |
+| `pnpm indexer embeddings:test --text <text>`                    | Embeds one text; prints metadata and a 5-value preview (`--show-vector` for all)         |
 | `pnpm api retrieve --question <text> --course-id <id[,id]>`     | Filtered retrieval: ranks, scores, metadata; `--excerpts`, `--json` (see docs/retrieval) |
 | `pnpm evaluation retrieval --file <cases.json>`                 | Runs retrieval evaluation cases; hit@1/3/5 and MRR; exit 1 if any case fails             |
 
@@ -88,7 +90,7 @@ pnpm -s api health
 ```
 
 The report lists each configuration group (`runtime`, `moodle`, `azureSearch`, `azureOpenAI`,
-`azureIdentity`, `retrieval`, `observability`) with `pass`, `warn` or `fail`. It shows variable **names** and
+`azureIdentity`, `retrieval`, `embeddings`, `observability`) with `pass`, `warn` or `fail`. It shows variable **names** and
 problems, never values. Exit codes: `0` healthy or warnings only, `1` a failed check, `2` usage
 error. Logs go to stderr as JSON lines; stdout carries only the report.
 
@@ -101,48 +103,59 @@ After `pnpm build`, the same commands run without tsx: `node apps/indexer/dist/c
 
 Validated with Zod in `packages/shared/src/config`. Empty values are treated as unset.
 
-| Variable                                | Group         | Notes                                                  |
-| --------------------------------------- | ------------- | ------------------------------------------------------ |
-| `NODE_ENV`                              | runtime       | `development` (default), `test`, `production`          |
-| `LOG_LEVEL`                             | runtime       | `trace` … `fatal`, `silent`; default `info`            |
-| `PORT`                                  | runtime       | 1–65535; default `3000`                                |
-| `MOODLE_BASE_URL`                       | moodle        | No credentials, query or fragment; https in production |
-| `MOODLE_TOKEN`                          | moodle        | Secret                                                 |
-| `MOODLE_REQUEST_TIMEOUT_MS`             | moodle        | Optional; 1000–300000, default 30000                   |
-| `MOODLE_DOWNLOAD_TIMEOUT_MS`            | moodle        | Optional; 1000–1800000, default 120000                 |
-| `MOODLE_MAX_DOWNLOAD_BYTES`             | moodle        | Optional; 1 KiB–2 GiB, default 100 MiB                 |
-| `MOODLE_MAX_RETRIES`                    | moodle        | Optional; 0–10, default 3                              |
-| `AZURE_SEARCH_ENDPOINT`                 | azureSearch   | https, no path                                         |
-| `AZURE_SEARCH_INDEX_NAME`               | azureSearch   | Optional; default `ehub-course-content-v1`             |
-| `AZURE_SEARCH_API_KEY`                  | azureSearch   | Secret, optional — local only; Azure uses Entra ID     |
-| `AZURE_SEARCH_VECTOR_DIMENSIONS`        | azureSearch   | Optional; 1–3072, default 1536 (must match embeddings) |
-| `AZURE_SEARCH_SEMANTIC_ENABLED`         | azureSearch   | Optional; `true` (default) or `false` (Free tier)      |
-| `AZURE_SEARCH_BATCH_SIZE`               | azureSearch   | Optional; 1–1000, default 500                          |
-| `AZURE_SEARCH_REQUEST_TIMEOUT_MS`       | azureSearch   | Optional; 1000–300000, default 30000                   |
-| `AZURE_SEARCH_MAX_RETRIES`              | azureSearch   | Optional; 0–10, default 3                              |
-| `AZURE_OPENAI_ENDPOINT`                 | azureOpenAI   | https                                                  |
-| `AZURE_OPENAI_CHAT_DEPLOYMENT`          | azureOpenAI   | Deployment name                                        |
-| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`     | azureOpenAI   | Deployment name                                        |
-| `AZURE_TENANT_ID`                       | azureIdentity | GUID                                                   |
-| `AZURE_CLIENT_ID`                       | azureIdentity | GUID                                                   |
-| `AZURE_CLIENT_SECRET`                   | azureIdentity | Secret, optional — local development only              |
-| `EXTRACTION_MAX_INPUT_BYTES`            | extraction    | Optional; default 50 MiB                               |
-| `EXTRACTION_MAX_TEXT_CHARS`             | extraction    | Optional; default 2,000,000                            |
-| `EXTRACTION_TIMEOUT_MS`                 | extraction    | Optional; default 60000                                |
-| `EXTRACTION_MAX_ARCHIVE_ENTRIES`        | extraction    | Optional; default 2000                                 |
-| `EXTRACTION_MAX_UNCOMPRESSED_BYTES`     | extraction    | Optional; default 200 MiB                              |
-| `CHUNK_TARGET_TOKENS`                   | chunking      | Optional; default 850                                  |
-| `CHUNK_MAX_TOKENS`                      | chunking      | Optional; default 1000                                 |
-| `CHUNK_MIN_TOKENS`                      | chunking      | Optional; default 100                                  |
-| `CHUNK_OVERLAP_TOKENS`                  | chunking      | Optional; default 125                                  |
-| `CHUNK_TOKENIZER`                       | chunking      | Optional; `cl100k_base` (default) or `o200k_base`      |
-| `RETRIEVAL_TOP_K`                       | retrieval     | Optional; 1–50, default 8                              |
-| `RETRIEVAL_MAX_CHUNKS_PER_RESOURCE`     | retrieval     | Optional; 1–50, default 3                              |
-| `RETRIEVAL_CANDIDATE_COUNT`             | retrieval     | Optional; 1–50, default 24, at least top K             |
-| `RETRIEVAL_SEMANTIC_RANKING`            | retrieval     | Optional; `true` (default) or `false`                  |
-| `RETRIEVAL_MIN_SCORE`                   | retrieval     | Optional; off by default                               |
-| `RETRIEVAL_MIN_RERANKER_SCORE`          | retrieval     | Optional; 0–4, off by default                          |
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | observability | Secret, optional                                       |
+| Variable                                                      | Group         | Notes                                                  |
+| ------------------------------------------------------------- | ------------- | ------------------------------------------------------ |
+| `NODE_ENV`                                                    | runtime       | `development` (default), `test`, `production`          |
+| `LOG_LEVEL`                                                   | runtime       | `trace` … `fatal`, `silent`; default `info`            |
+| `PORT`                                                        | runtime       | 1–65535; default `3000`                                |
+| `MOODLE_BASE_URL`                                             | moodle        | No credentials, query or fragment; https in production |
+| `MOODLE_TOKEN`                                                | moodle        | Secret                                                 |
+| `MOODLE_REQUEST_TIMEOUT_MS`                                   | moodle        | Optional; 1000–300000, default 30000                   |
+| `MOODLE_DOWNLOAD_TIMEOUT_MS`                                  | moodle        | Optional; 1000–1800000, default 120000                 |
+| `MOODLE_MAX_DOWNLOAD_BYTES`                                   | moodle        | Optional; 1 KiB–2 GiB, default 100 MiB                 |
+| `MOODLE_MAX_RETRIES`                                          | moodle        | Optional; 0–10, default 3                              |
+| `AZURE_SEARCH_ENDPOINT`                                       | azureSearch   | https, no path                                         |
+| `AZURE_SEARCH_INDEX_NAME`                                     | azureSearch   | Optional; default `ehub-course-content-v1`             |
+| `AZURE_SEARCH_API_KEY`                                        | azureSearch   | Secret, optional — local only; Azure uses Entra ID     |
+| `AZURE_SEARCH_VECTOR_DIMENSIONS`                              | azureSearch   | Optional; 1–3072, default 1536 (must match embeddings) |
+| `AZURE_SEARCH_SEMANTIC_ENABLED`                               | azureSearch   | Optional; `true` (default) or `false` (Free tier)      |
+| `AZURE_SEARCH_BATCH_SIZE`                                     | azureSearch   | Optional; 1–1000, default 500                          |
+| `AZURE_SEARCH_REQUEST_TIMEOUT_MS`                             | azureSearch   | Optional; 1000–300000, default 30000                   |
+| `AZURE_SEARCH_MAX_RETRIES`                                    | azureSearch   | Optional; 0–10, default 3                              |
+| `AZURE_OPENAI_ENDPOINT`                                       | azureOpenAI   | https                                                  |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT`                                | azureOpenAI   | Deployment name                                        |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`                           | azureOpenAI   | Deployment name                                        |
+| `AZURE_TENANT_ID`                                             | azureIdentity | GUID                                                   |
+| `AZURE_CLIENT_ID`                                             | azureIdentity | GUID                                                   |
+| `AZURE_CLIENT_SECRET`                                         | azureIdentity | Secret, optional — local development only              |
+| `EXTRACTION_MAX_INPUT_BYTES`                                  | extraction    | Optional; default 50 MiB                               |
+| `EXTRACTION_MAX_TEXT_CHARS`                                   | extraction    | Optional; default 2,000,000                            |
+| `EXTRACTION_TIMEOUT_MS`                                       | extraction    | Optional; default 60000                                |
+| `EXTRACTION_MAX_ARCHIVE_ENTRIES`                              | extraction    | Optional; default 2000                                 |
+| `EXTRACTION_MAX_UNCOMPRESSED_BYTES`                           | extraction    | Optional; default 200 MiB                              |
+| `CHUNK_TARGET_TOKENS`                                         | chunking      | Optional; default 850                                  |
+| `CHUNK_MAX_TOKENS`                                            | chunking      | Optional; default 1000                                 |
+| `CHUNK_MIN_TOKENS`                                            | chunking      | Optional; default 100                                  |
+| `CHUNK_OVERLAP_TOKENS`                                        | chunking      | Optional; default 125                                  |
+| `CHUNK_TOKENIZER`                                             | chunking      | Optional; `cl100k_base` (default) or `o200k_base`      |
+| `AZURE_OPENAI_API_KEY`                                        | embeddings    | Secret, optional — local only; Azure uses Entra ID     |
+| `AZURE_OPENAI_TOKEN_SCOPE`                                    | embeddings    | Optional; default `https://ai.azure.com/.default`      |
+| `AZURE_OPENAI_EMBEDDING_MODEL`                                | embeddings    | Optional; default `text-embedding-3-small`             |
+| `AZURE_OPENAI_EMBEDDING_DIMENSIONS`                           | embeddings    | Optional; default 1536; must equal the index           |
+| `AZURE_OPENAI_EMBEDDING_SEND_DIMENSIONS`                      | embeddings    | Optional; `false` (default) or `true`                  |
+| `EMBEDDING_VERSION`                                           | embeddings    | Optional; default `1`; bump to force re-embedding      |
+| `EMBEDDING_BATCH_SIZE` / `EMBEDDING_MAX_BATCH_TOKENS`         | embeddings    | Optional; 64 / 100000                                  |
+| `EMBEDDING_MAX_INPUT_TOKENS`                                  | embeddings    | Optional; default 8191                                 |
+| `EMBEDDING_MAX_CONCURRENCY` / `EMBEDDING_REQUESTS_PER_MINUTE` | embeddings    | Optional; 2 / 120                                      |
+| `EMBEDDING_REQUEST_TIMEOUT_MS` / `EMBEDDING_MAX_RETRIES`      | embeddings    | Optional; 30000 / 4                                    |
+| `EMBEDDING_CACHE_DIR`                                         | embeddings    | Optional; persistent cache (holds vectors)             |
+| `RETRIEVAL_TOP_K`                                             | retrieval     | Optional; 1–50, default 8                              |
+| `RETRIEVAL_MAX_CHUNKS_PER_RESOURCE`                           | retrieval     | Optional; 1–50, default 3                              |
+| `RETRIEVAL_CANDIDATE_COUNT`                                   | retrieval     | Optional; 1–50, default 24, at least top K             |
+| `RETRIEVAL_SEMANTIC_RANKING`                                  | retrieval     | Optional; `true` (default) or `false`                  |
+| `RETRIEVAL_MIN_SCORE`                                         | retrieval     | Optional; off by default                               |
+| `RETRIEVAL_MIN_RERANKER_SCORE`                                | retrieval     | Optional; 0–4, off by default                          |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING`                       | observability | Secret, optional                                       |
 
 In production every `*_URL` / `*_ENDPOINT` variable must use https.
 

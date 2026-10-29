@@ -31,6 +31,7 @@ import {
 import {
   SEARCH_API_VERSION,
   SEARCH_SCHEMA_VERSION,
+  VECTOR_FIELD_NAME,
   buildIndexDefinition,
   type SearchIndexDefinition,
 } from './indexDefinition.js';
@@ -158,6 +159,8 @@ export interface SearchIndexClient {
   readonly expectedDefinition: SearchIndexDefinition;
   createOrUpdateIndex(options?: CreateOrUpdateIndexOptions): Promise<CreateOrUpdateIndexResult>;
   validateIndexSchema(options?: SearchCallOptions): Promise<IndexValidationResult>;
+  /** The deployed vector field's dimensions, or undefined when the index or field is missing. */
+  getDeployedVectorDimensions(options?: SearchCallOptions): Promise<number | undefined>;
   uploadChunks(
     documents: readonly SearchDocument[],
     options?: SearchCallOptions,
@@ -385,6 +388,12 @@ export class RestSearchIndexClient implements SearchIndexClient {
 
   async validateIndexSchema(options: SearchCallOptions = {}): Promise<IndexValidationResult> {
     return this.#validationFor(await this.#getDeployedIndex(options.signal));
+  }
+
+  async getDeployedVectorDimensions(options: SearchCallOptions = {}): Promise<number | undefined> {
+    const deployed = await this.#getDeployedIndex(options.signal);
+    const field = deployed?.fields.find((entry) => entry.name === VECTOR_FIELD_NAME);
+    return field?.dimensions ?? undefined;
   }
 
   async createOrUpdateIndex(

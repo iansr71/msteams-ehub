@@ -91,3 +91,19 @@ design, every real search would have returned nothing because nothing fills thos
 `isActive eq true` is part of every query filter and is not a setting, although Prompt 7 asks
 for all retrieval settings to be configurable: its explicit rule that inactive content must not
 be retrieved takes precedence.
+
+## Azure OpenAI embeddings through REST, not the SDK (phase 8)
+
+As for Azure AI Search, embeddings call the Azure OpenAI v1 REST endpoint with `fetch`. The
+provider owns batching, input limits, throttling, retries and what may appear in logs and
+errors (never input text or Azure's message, which can quote it), and tests run against an
+in-process fake. Entra ID tokens come from `@azure/identity`.
+
+## Embedding cache keyed by model, version, dimensions and text (phase 8)
+
+Embeddings are cached by SHA-256 of model identifier, `EMBEDDING_VERSION`, dimensions and the
+normalised text's hash, so unchanged chunks are not re-embedded while a model or version change
+always regenerates. The index also records model, version, dimensions and time per chunk
+(schema version 2) for phase 11's change detection. Chunks are embedded with their resource and
+heading path prepended, because short chunks otherwise lose the context that makes them
+findable.

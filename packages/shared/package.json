@@ -14,6 +14,11 @@
       "@ehub/source": "./src/search/index.ts",
       "types": "./dist/search/index.d.ts",
       "default": "./dist/search/index.js"
+    },
+    "./embeddings": {
+      "@ehub/source": "./src/embeddings/index.ts",
+      "types": "./dist/embeddings/index.d.ts",
+      "default": "./dist/embeddings/index.js"
     }
   },
   "files": [

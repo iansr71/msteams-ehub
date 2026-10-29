@@ -1,18 +1,23 @@
+import {
+  RETRYABLE_HTTP_STATUSES,
+  RETRYABLE_NETWORK_CODES,
+  networkCode,
+  type HttpFetch,
+  type RetryPolicy,
+} from '../http/retry.js';
 import { SearchServiceError, sanitizeServiceMessage, type SearchErrorCategory } from './errors.js';
 
-/** The subset of `fetch` the client needs; injected so tests never reach a real service. */
-export type SearchFetch = (input: string, init: RequestInit) => Promise<Response>;
-export type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
-export type RandomSource = () => number;
+export {
+  defaultSleep,
+  parseRetryAfterHeaders,
+  retryDelay,
+  type RandomSource,
+  type Sleep,
+} from '../http/retry.js';
 
-export interface SearchRetryPolicy {
-  /** Retries after the first attempt. */
-  readonly maxRetries: number;
-  readonly baseDelayMs: number;
-  readonly maxDelayMs: number;
-  /** A Retry-After longer than this is not waited for; the error is surfaced instead. */
-  readonly maxRetryAfterMs: number;
-}
+/** The subset of `fetch` the client needs; injected so tests never reach a real service. */
+export type SearchFetch = HttpFetch;
+export type SearchRetryPolicy = RetryPolicy;
 
 export const DEFAULT_SEARCH_RETRY_POLICY: SearchRetryPolicy = {
   maxRetries: 3,
@@ -20,71 +25,6 @@ export const DEFAULT_SEARCH_RETRY_POLICY: SearchRetryPolicy = {
   maxDelayMs: 10_000,
   maxRetryAfterMs: 60_000,
 };
-
-export const defaultSleep: Sleep = (ms, signal) =>
-  new Promise((resolve, reject) => {
-    if (signal?.aborted === true) {
-      reject(signal.reason instanceof Error ? signal.reason : new Error('Aborted.'));
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(signal?.reason instanceof Error ? signal.reason : new Error('Aborted.'));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-
-/** Full-jitter exponential backoff, honouring a server-requested delay when it is longer. */
-export function retryDelay(
-  attempt: number,
-  policy: SearchRetryPolicy,
-  retryAfterMs: number | undefined,
-  random: RandomSource,
-): number | undefined {
-  const backoff = Math.floor(
-    random() * Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** attempt),
-  );
-  if (retryAfterMs === undefined) {
-    return backoff;
-  }
-  return retryAfterMs > policy.maxRetryAfterMs ? undefined : Math.max(retryAfterMs, backoff);
-}
-
-/** Reads `retry-after-ms`, `x-ms-retry-after-ms` or `Retry-After` (seconds or HTTP date). */
-export function parseRetryAfterHeaders(
-  headers: Headers,
-  now: number = Date.now(),
-): number | undefined {
-  for (const name of ['retry-after-ms', 'x-ms-retry-after-ms']) {
-    const value = headers.get(name)?.trim();
-    if (value !== undefined && /^\d+$/.test(value)) {
-      return Number(value);
-    }
-  }
-  const value = headers.get('retry-after')?.trim();
-  if (value === undefined) {
-    return undefined;
-  }
-  if (/^\d+$/.test(value)) {
-    return Number(value) * 1000;
-  }
-  const date = /[a-z]/i.test(value) ? Date.parse(value) : Number.NaN;
-  return Number.isNaN(date) ? undefined : Math.max(0, date - now);
-}
-
-const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
-
-/** Connection resets and temporary DNS failures; refused connections and TLS errors are not. */
-const RETRYABLE_NETWORK_CODES: ReadonlySet<string> = new Set([
-  'ECONNRESET',
-  'UND_ERR_SOCKET',
-  'EAI_AGAIN',
-  'ETIMEDOUT',
-]);
 
 function categoryForStatus(status: number): SearchErrorCategory {
   switch (status) {
@@ -158,21 +98,10 @@ export function errorFromHttpResponse(options: HttpErrorOptions): SearchServiceE
       operation: options.operation,
       httpStatus: options.status,
       ...(code === undefined ? {} : { serviceCode: sanitizeServiceMessage(code) }),
-      retryable: RETRYABLE_STATUSES.has(options.status),
+      retryable: RETRYABLE_HTTP_STATUSES.has(options.status),
       ...(options.retryAfterMs === undefined ? {} : { retryAfterMs: options.retryAfterMs }),
     },
   );
-}
-
-function networkCode(error: unknown): string | undefined {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && typeof current === 'object' && current !== null; depth += 1) {
-    if ('code' in current && typeof current.code === 'string') {
-      return current.code;
-    }
-    current = 'cause' in current ? current.cause : undefined;
-  }
-  return undefined;
 }
 
 export function errorFromFetchFailure(

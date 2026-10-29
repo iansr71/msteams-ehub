@@ -85,8 +85,9 @@ pnpm evaluation retrieval --file tests/evaluation/retrieval-cases.json --case ca
   excerpt is at most 160 characters, one line, with control characters removed and secrets
   redacted, and is labelled as untrusted source text.
 - The question is never logged.
-- Vector and hybrid modes need a query vector. Until embeddings exist (phase 8), only a JSON file
-  of numbers (`--vector-file`) can supply one; evaluation runs in keyword mode.
+- With the embedding settings configured (see `docs/embeddings.md`), the question is embedded
+  and retrieval is hybrid by default; `--mode keyword` skips the embedding. Without them,
+  retrieval is keyword-only unless `--vector-file` supplies a JSON array of numbers.
 - Exit codes: `retrieve` 0 on success; `evaluation retrieval` 0 only if every case passes, 1
   otherwise; 2 for usage errors. Relative file paths resolve against the directory you ran
   `pnpm` from.

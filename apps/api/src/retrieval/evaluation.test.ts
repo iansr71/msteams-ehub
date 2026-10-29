@@ -145,6 +145,7 @@ function stub(chunksFor: (testCase: string) => RetrievedChunk[] | Error): Retrie
         mode: 'keyword',
         semanticApplied: false,
         topK: 8,
+        queryEmbeddingModel: undefined,
         candidates: outcome.length,
         droppedBelowThreshold: 0,
         droppedByResourceCap: 0,

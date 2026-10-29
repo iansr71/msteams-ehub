@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 import { loadBinary } from '../extractors/__fixtures__/helpers.js';
 import { fixtureClient, type ContentsFixture } from '../moodle/__fixtures__/fixtureClient.js';
+import { createEmbeddingProvider } from '@ehub/shared/embeddings';
+
+import { FakeEmbeddingService } from '../../../../packages/shared/src/embeddings/__fixtures__/fakeEmbeddingService.js';
 import { createChunkTestCommand } from './chunkCommand.js';
 
 const env = {
@@ -38,6 +41,7 @@ async function run(
   } = {},
 ) {
   const fixture = fixtureClient({ contents: options.contents ?? 'contents-pdf-resource' });
+  const embeddings = new FakeEmbeddingService({ apiKey: OPENAI_KEY, dimensions: 8 });
   const output: string[] = [];
   const logs: string[] = [];
   const context: CommandContext = {
@@ -49,22 +53,62 @@ async function run(
     }),
     stdout: (text) => output.push(text),
   };
-  const exitCode = await createChunkTestCommand({
-    env: options.env ?? env,
-    createAccess: (settings) => ({
-      client: fixture.client,
-      baseUrl: fixture.baseUrl,
-      downloader: downloader(
-        options.bytes ?? loadBinary('sample.pdf'),
-        options.contentType ?? 'application/pdf',
-      ),
-      settings,
-    }),
-  }).run(context);
-  return { exitCode, stdout: output.join('\n'), logs: logs.join('\n') };
+  const exitCode = await createChunkTestCommand(
+    {
+      env: options.env ?? env,
+      createAccess: (settings) => ({
+        client: fixture.client,
+        baseUrl: fixture.baseUrl,
+        downloader: downloader(
+          options.bytes ?? loadBinary('sample.pdf'),
+          options.contentType ?? 'application/pdf',
+        ),
+        settings,
+      }),
+    },
+    {
+      env: options.env ?? env,
+      createEmbedder: (settings) => createEmbeddingProvider(settings, { fetch: embeddings.fetch }),
+    },
+  ).run(context);
+  return { exitCode, stdout: output.join('\n'), logs: logs.join('\n'), embeddings };
 }
 
 const PDF = ['--course-id', '12', '--resource-id', '501:file:/checklist.pdf'];
+const OPENAI_KEY = 'fake-openai-key-0123456789abcdef0123';
+
+describe('chunk:test --embed', () => {
+  const embeddingEnv = {
+    ...env,
+    AZURE_OPENAI_ENDPOINT: 'https://contoso.openai.azure.com',
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: 'embed',
+    AZURE_OPENAI_API_KEY: OPENAI_KEY,
+    AZURE_OPENAI_EMBEDDING_DIMENSIONS: '8',
+  };
+
+  it('embeds the chunks and validates their index documents without printing vectors', async () => {
+    const result = await run([...PDF, '--embed', '--json'], { env: embeddingEnv });
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { embedding: Record<string, unknown> };
+    expect(parsed.embedding).toEqual({
+      model: 'text-embedding-3-small',
+      version: '1',
+      dimensions: 8,
+      documents: 3,
+      generated: 3,
+      cached: 0,
+    });
+    expect(result.embeddings.requests).toHaveLength(1);
+    expect(result.stdout).not.toMatch(/contentVector|"vector"/);
+    expect(result.stdout + result.logs).not.toContain(OPENAI_KEY);
+  });
+
+  it('reports missing embedding configuration by variable name', async () => {
+    const result = await run([...PDF, '--embed']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('AZURE_OPENAI_ENDPOINT: Required.');
+  });
+});
 
 describe('chunk:test', () => {
   it('shows chunk numbers, token counts, locations and source metadata', async () => {

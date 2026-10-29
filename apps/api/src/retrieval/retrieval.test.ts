@@ -74,9 +74,9 @@ describe('SearchQueryBuilder', () => {
     const vectorOnly = build({ ...base, question: 'peel', queryVector: vector, mode: 'vector' });
     expect(vectorOnly.plan.body).not.toHaveProperty('search');
     expect(vectorOnly.plan.semantic).toBe(false);
-    expect(() =>
-      retrievalRequestSchema.parse({ ...base, question: 'peel', mode: 'hybrid' }),
-    ).toThrow(/needs a query vector/);
+    expect(() => build({ ...base, question: 'peel', mode: 'hybrid' })).toThrow(
+      /needs a query vector/,
+    );
   });
 
   it('honours top K, candidate count and the semantic setting', () => {
@@ -206,6 +206,72 @@ describe('RetrievalService', () => {
       .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(RetrievalRequestError);
     expect((failure as Error).message).not.toContain('confidential-question');
+  });
+});
+
+describe('RetrievalService with query embeddings', () => {
+  function embedder() {
+    const questions: string[] = [];
+    return {
+      questions,
+      embedder: {
+        getModelIdentifier: () => 'text-embedding-3-small',
+        embedText: (text: string) => {
+          questions.push(text);
+          return Promise.resolve({
+            vector: placeholderVector(text, TEST_DIMENSIONS),
+            cached: false,
+            metadata: {
+              modelIdentifier: 'text-embedding-3-small',
+              embeddingVersion: '1',
+              dimensions: TEST_DIMENSIONS,
+              generatedAt: '2026-10-29T10:00:00.000Z',
+              contentHash: 'a'.repeat(64),
+              cacheKey: 'b'.repeat(64),
+            },
+          });
+        },
+      },
+    };
+  }
+
+  it('embeds the question and runs pre-filtered hybrid retrieval by default', async () => {
+    const { client, service: fake } = await seededSearch();
+    const { embedder: queryEmbedder, questions } = embedder();
+    const service = new RetrievalService({ search: client, settings, embedder: queryEmbedder });
+    const result = await service.retrieve({ ...base, question: 'laser eye protection' });
+    expect(result.mode).toBe('hybrid');
+    expect(result.queryEmbeddingModel).toBe('text-embedding-3-small');
+    expect(questions).toEqual(['laser eye protection']);
+    expect(result.chunks.every((chunk) => chunk.courseId === 12)).toBe(true);
+    const body = JSON.parse(fake.requests.at(-1)?.body ?? '{}') as Record<string, unknown>;
+    expect(body).toMatchObject({
+      search: 'laser eye protection',
+      vectorFilterMode: 'preFilter',
+      filter: `tenantId eq '${TENANT_ID}' and isActive eq true and (courseId eq 12)`,
+    });
+  });
+
+  it('does not embed in keyword mode, and embeds for vector mode', async () => {
+    const { client } = await seededSearch();
+    const { embedder: queryEmbedder, questions } = embedder();
+    const service = new RetrievalService({ search: client, settings, embedder: queryEmbedder });
+    expect((await service.retrieve({ ...base, question: 'peel', mode: 'keyword' })).mode).toBe(
+      'keyword',
+    );
+    expect(questions).toEqual([]);
+    const vector = await service.retrieve({ ...base, question: 'peel', mode: 'vector' });
+    expect(vector.mode).toBe('vector');
+    expect(questions).toEqual(['peel']);
+  });
+
+  it('defaults to keyword retrieval when no embedder is configured', async () => {
+    const { client } = await seededSearch();
+    const service = new RetrievalService({ search: client, settings });
+    expect((await service.retrieve({ ...base, question: 'peel' })).mode).toBe('keyword');
+    await expect(service.retrieve({ ...base, question: 'peel', mode: 'hybrid' })).rejects.toThrow(
+      RetrievalRequestError,
+    );
   });
 });
 

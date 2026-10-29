@@ -1,8 +1,10 @@
 import { createLogger, type Logger } from '@ehub/shared';
+import type { EmbeddingProvider } from '@ehub/shared/embeddings';
 import type { SearchCallOptions, SearchHit, SearchIndexClient } from '@ehub/shared/search';
 
 import { RetrievalResultMapper, type RetrievedChunk } from './retrievalResultMapper.js';
 import {
+  RetrievalRequestError,
   SearchQueryBuilder,
   retrievalRequestSchema,
   type RetrievalMode,
@@ -10,21 +12,18 @@ import {
 } from './searchQueryBuilder.js';
 import type { RetrievalSettings } from './settings.js';
 
-export class RetrievalRequestError extends Error {
-  readonly fields: readonly string[];
+export { RetrievalRequestError };
 
-  constructor(fields: readonly string[], message: string) {
-    super(message);
-    this.name = 'RetrievalRequestError';
-    this.fields = fields;
-  }
-}
+/** Embeds questions for vector and hybrid retrieval. */
+export type QueryEmbedder = Pick<EmbeddingProvider, 'embedText' | 'getModelIdentifier'>;
 
 export interface RetrievalResult {
   readonly chunks: readonly RetrievedChunk[];
   readonly mode: RetrievalMode;
   readonly semanticApplied: boolean;
   readonly topK: number;
+  /** The embedding model used for the question, when one was embedded. */
+  readonly queryEmbeddingModel: string | undefined;
   /** Results the index returned before thresholds and the per-resource cap. */
   readonly candidates: number;
   readonly droppedBelowThreshold: number;
@@ -38,6 +37,8 @@ export type SearchPort = Pick<SearchIndexClient, 'search'>;
 export interface RetrievalServiceOptions {
   readonly search: SearchPort;
   readonly settings: RetrievalSettings;
+  /** When set, questions are embedded and retrieval defaults to hybrid. */
+  readonly embedder?: QueryEmbedder;
   readonly logger?: Logger;
 }
 
@@ -53,9 +54,11 @@ export class RetrievalService {
   readonly #builder: SearchQueryBuilder;
   readonly #mapper = new RetrievalResultMapper();
   readonly #logger: Logger;
+  readonly #embedder: QueryEmbedder | undefined;
 
   constructor(options: RetrievalServiceOptions) {
     this.#search = options.search;
+    this.#embedder = options.embedder;
     this.#settings = options.settings;
     this.#builder = new SearchQueryBuilder(options.settings);
     this.#logger = (options.logger ?? silentLogger).child({ component: 'retrieval' });
@@ -75,7 +78,17 @@ export class RetrievalService {
         `Invalid retrieval request (${fields.join(', ') || 'request'}): ${parsed.error.issues[0]?.message ?? 'invalid'}`,
       );
     }
-    const built = this.#builder.build(parsed.data);
+    let validated = parsed.data;
+    const mode =
+      validated.mode ??
+      (validated.queryVector !== undefined || this.#embedder !== undefined ? 'hybrid' : 'keyword');
+    let queryEmbeddingModel: string | undefined;
+    if (mode !== 'keyword' && validated.queryVector === undefined && this.#embedder !== undefined) {
+      const embedding = await this.#embedder.embedText(validated.question, options);
+      validated = { ...validated, queryVector: [...embedding.vector] };
+      queryEmbeddingModel = embedding.metadata.modelIdentifier;
+    }
+    const built = this.#builder.build({ ...validated, mode });
     const response = await this.#search.search(built.query, options);
 
     const passing = response.hits.filter((hit) => this.#meetsThresholds(hit));
@@ -98,6 +111,7 @@ export class RetrievalService {
       mode: built.mode,
       semanticApplied: response.semanticApplied,
       topK: built.topK,
+      queryEmbeddingModel,
       candidates: response.hits.length,
       droppedBelowThreshold: response.hits.length - passing.length,
       droppedByResourceCap,
@@ -111,7 +125,7 @@ export class RetrievalService {
       returned: chunks.length,
       droppedBelowThreshold: result.droppedBelowThreshold,
       droppedByResourceCap,
-      courses: parsed.data.courseIds?.length ?? parsed.data.authorizedCourseIds.length,
+      courses: validated.courseIds?.length ?? validated.authorizedCourseIds.length,
       durationMs: result.durationMs,
     });
     return result;

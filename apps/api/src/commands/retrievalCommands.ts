@@ -10,6 +10,8 @@ import {
   azureIdentityConfigShape,
   azureSearchConfigSchema,
   courseIdListSchema,
+  embeddingConfigSchema,
+  getConfigFeatureStatus,
   loadConfig,
   parseCommandArgs,
   redactString,
@@ -20,6 +22,12 @@ import {
   type EnvironmentSource,
   type Logger,
 } from '@ehub/shared';
+import {
+  EmbeddingError,
+  createEmbeddingProvider,
+  isEmbeddingError,
+  type EmbeddingSettings,
+} from '@ehub/shared/embeddings';
 import {
   InvalidFilterValueError,
   SEARCH_RESOURCE_TYPES,
@@ -41,6 +49,7 @@ import { RetrievalDiagnostics } from '../retrieval/retrievalDiagnostics.js';
 import {
   RetrievalRequestError,
   RetrievalService,
+  type QueryEmbedder,
   type SearchPort,
 } from '../retrieval/retrievalService.js';
 import { RETRIEVAL_MODES } from '../retrieval/searchQueryBuilder.js';
@@ -50,6 +59,7 @@ import { retrievalSettingsFromConfig } from '../retrieval/settings.js';
 export interface RetrievalCommandDependencies {
   readonly env: EnvironmentSource;
   readonly createSearch?: (settings: SearchClientSettings, logger: Logger) => Promise<SearchPort>;
+  readonly createEmbedder?: (settings: EmbeddingSettings, logger: Logger) => Promise<QueryEmbedder>;
   /** Directory relative paths resolve against: pnpm's INIT_CWD (where the user ran pnpm). */
   readonly cwd?: string;
   readonly readTextFile?: (path: string, maxBytes: number) => Promise<string>;
@@ -62,6 +72,7 @@ const FATAL_SEARCH_CATEGORIES: ReadonlySet<string> = new Set([
   'authorization',
   'not_found',
   'network',
+  'dimension_mismatch',
 ]);
 
 class InputFileError extends Error {
@@ -118,15 +129,47 @@ async function openRetrieval(
     dependencies.createSearch ??
     ((settings: SearchClientSettings, log: Logger) =>
       createSearchIndexClient(settings, { logger: log }));
+  const embedder = await openQueryEmbedder(
+    dependencies,
+    searchConfig.AZURE_SEARCH_VECTOR_DIMENSIONS,
+    logger,
+  );
   const search = await createSearch(searchConfig, logger);
   return {
     service: new RetrievalService({
       search,
       settings: retrievalSettingsFromConfig(retrievalConfig),
+      ...(embedder === undefined ? {} : { embedder }),
       logger,
     }),
     tenantId,
   };
+}
+
+/**
+ * Query embeddings when the embedding settings are configured; keyword retrieval when they are
+ * absent. Partly configured settings are an error rather than a silent fallback, and the
+ * embedding size must match the index.
+ */
+async function openQueryEmbedder(
+  dependencies: RetrievalCommandDependencies,
+  indexDimensions: number,
+  logger: Logger,
+): Promise<QueryEmbedder | undefined> {
+  if (getConfigFeatureStatus('embeddings', dependencies.env).state === 'missing') {
+    return undefined;
+  }
+  const settings = loadConfig(embeddingConfigSchema, dependencies.env);
+  if (settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS !== indexDimensions) {
+    throw new EmbeddingError(
+      `AZURE_OPENAI_EMBEDDING_DIMENSIONS (${String(settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS)}) does not match AZURE_SEARCH_VECTOR_DIMENSIONS (${String(indexDimensions)}).`,
+      { category: 'dimension_mismatch' },
+    );
+  }
+  return (
+    dependencies.createEmbedder ??
+    ((resolved, log) => createEmbeddingProvider(resolved, { logger: log }))
+  )(settings, logger);
 }
 
 interface FailureReport {
@@ -151,6 +194,16 @@ function describeFailure(error: unknown): FailureReport | undefined {
     };
   }
   if (isSearchServiceError(error)) {
+    return {
+      status: 'error',
+      error: {
+        category: error.category,
+        message: error.message,
+        ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }),
+      },
+    };
+  }
+  if (isEmbeddingError(error)) {
     return {
       status: 'error',
       error: {
@@ -365,7 +418,8 @@ export function createRetrievalEvaluationCommand(
           diagnostics: { excerpts: args.excerpts === true },
           describeError: (error) => describeFailure(error)?.error.message ?? 'Unexpected error.',
           isFatal: (error) =>
-            isSearchServiceError(error) && FATAL_SEARCH_CATEGORIES.has(error.category),
+            (isSearchServiceError(error) || isEmbeddingError(error)) &&
+            FATAL_SEARCH_CATEGORIES.has(error.category),
         });
         const report = await runner.run(cases);
         context.logger.info('Retrieval evaluation completed.', { ...report.summary });

@@ -9,6 +9,7 @@ export type NodeEnvironment = (typeof NODE_ENVIRONMENTS)[number];
 export const SECRET_ENV_KEYS = [
   'MOODLE_TOKEN',
   'AZURE_SEARCH_API_KEY',
+  'AZURE_OPENAI_API_KEY',
   'AZURE_CLIENT_SECRET',
   'APPLICATIONINSIGHTS_CONNECTION_STRING',
 ] as const;
@@ -151,6 +152,62 @@ export const azureOpenAIConfigShape = {
   AZURE_OPENAI_EMBEDDING_DEPLOYMENT: azureDeploymentName,
 };
 
+export const EMBEDDING_DEFAULTS = {
+  model: 'text-embedding-3-small',
+  dimensions: 1536,
+  version: '1',
+  batchSize: 64,
+  maxBatchTokens: 100_000,
+  maxInputTokens: 8_191,
+  maxConcurrency: 2,
+  requestsPerMinute: 120,
+  requestTimeoutMs: 30_000,
+  maxRetries: 4,
+  tokenScope: 'https://ai.azure.com/.default',
+} as const;
+
+/*
+ * Embedding generation through an Azure OpenAI embedding deployment (phase 8). Separate from
+ * azureOpenAI so the indexer does not need a chat deployment configured.
+ */
+export const embeddingConfigShape = {
+  AZURE_OPENAI_ENDPOINT: serviceUrl({ httpsOnly: true }),
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT: azureDeploymentName,
+  /** Local development only; Azure deployments authenticate with Managed Identity. */
+  AZURE_OPENAI_API_KEY: secretString(20).optional(),
+  /** Microsoft Entra ID token scope for Azure OpenAI. */
+  AZURE_OPENAI_TOKEN_SCOPE: z
+    .url({ protocol: /^https$/, message: 'Must be an https scope URI.' })
+    .default(EMBEDDING_DEFAULTS.tokenScope),
+  /** The model behind the deployment; recorded with every embedding and in the cache key. */
+  AZURE_OPENAI_EMBEDDING_MODEL: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, {
+      message: 'Must be 1-64 letters, digits, ".", "_" or "-".',
+    })
+    .default(EMBEDDING_DEFAULTS.model),
+  /** Must equal AZURE_SEARCH_VECTOR_DIMENSIONS. */
+  AZURE_OPENAI_EMBEDDING_DIMENSIONS: boundedInteger(1, 3072, EMBEDDING_DEFAULTS.dimensions),
+  /** Send `dimensions` in requests (text-embedding-3 models only) to shorten vectors. */
+  AZURE_OPENAI_EMBEDDING_SEND_DIMENSIONS: booleanFlag(false),
+  /** Bump to force re-embedding with the same model (e.g. after changing input normalisation). */
+  EMBEDDING_VERSION: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9._-]{1,32}$/, { message: 'Must be 1-32 letters, digits, ".", "_" or "-".' })
+    .default(EMBEDDING_DEFAULTS.version),
+  EMBEDDING_BATCH_SIZE: boundedInteger(1, 2048, EMBEDDING_DEFAULTS.batchSize),
+  EMBEDDING_MAX_BATCH_TOKENS: boundedInteger(1_000, 300_000, EMBEDDING_DEFAULTS.maxBatchTokens),
+  EMBEDDING_MAX_INPUT_TOKENS: boundedInteger(1, 8_192, EMBEDDING_DEFAULTS.maxInputTokens),
+  EMBEDDING_MAX_CONCURRENCY: boundedInteger(1, 16, EMBEDDING_DEFAULTS.maxConcurrency),
+  EMBEDDING_REQUESTS_PER_MINUTE: boundedInteger(1, 10_000, EMBEDDING_DEFAULTS.requestsPerMinute),
+  EMBEDDING_REQUEST_TIMEOUT_MS: boundedInteger(1_000, 300_000, EMBEDDING_DEFAULTS.requestTimeoutMs),
+  EMBEDDING_MAX_RETRIES: boundedInteger(0, 10, EMBEDDING_DEFAULTS.maxRetries),
+  /** Optional directory for the persistent embedding cache (indexer). */
+  EMBEDDING_CACHE_DIR: z.string().trim().min(1).max(500).optional(),
+};
+
 export const azureIdentityConfigShape = {
   AZURE_TENANT_ID: guid('AZURE_TENANT_ID'),
   AZURE_CLIENT_ID: guid('AZURE_CLIENT_ID'),
@@ -272,6 +329,7 @@ export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).supe
   },
 );
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
+export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
 export const retrievalConfigSchema = defineConfigSchema(retrievalConfigShape).superRefine(
   (config, ctx) => {
     if (config.RETRIEVAL_CANDIDATE_COUNT < config.RETRIEVAL_TOP_K) {
@@ -315,6 +373,7 @@ export const applicationConfigSchema = defineConfigSchema({
   ...azureOpenAIConfigShape,
   ...azureIdentityConfigShape,
   ...retrievalConfigShape,
+  ...embeddingConfigShape,
   ...observabilityConfigShape,
 });
 
@@ -325,6 +384,7 @@ export type AzureOpenAIConfig = z.output<typeof azureOpenAIConfigSchema>;
 export type AzureIdentityConfig = z.output<typeof azureIdentityConfigSchema>;
 export type ExtractionConfig = z.output<typeof extractionConfigSchema>;
 export type RetrievalConfig = z.output<typeof retrievalConfigSchema>;
+export type EmbeddingConfig = z.output<typeof embeddingConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -339,6 +399,7 @@ export const CONFIG_FEATURES = {
   extraction: extractionConfigSchema,
   chunking: chunkingConfigSchema,
   retrieval: retrievalConfigSchema,
+  embeddings: embeddingConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -354,5 +415,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   extraction: Object.keys(extractionConfigShape),
   chunking: Object.keys(chunkingConfigShape),
   retrieval: Object.keys(retrievalConfigShape),
+  embeddings: Object.keys(embeddingConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

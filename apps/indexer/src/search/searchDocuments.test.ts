@@ -17,6 +17,7 @@ import {
 } from './searchDiagnostics.js';
 import {
   InvalidSearchDocumentError,
+  buildEmbeddingText,
   VectorDimensionError,
   toSearchDocument,
 } from './searchDocuments.js';
@@ -64,11 +65,36 @@ function chunk(overrides: Partial<ContentChunk> = {}): ContentChunk {
   });
 }
 
+function embedding(vector: number[], dimensions = vector.length) {
+  return {
+    vector,
+    metadata: {
+      modelIdentifier: 'text-embedding-3-small',
+      embeddingVersion: '1',
+      dimensions,
+      generatedAt: '2026-10-29T10:00:00.000Z',
+      contentHash: 'a'.repeat(64),
+      cacheKey: 'b'.repeat(64),
+    },
+  };
+}
+
+describe('buildEmbeddingText', () => {
+  it('prefixes the resource and heading path, skipping repeats', () => {
+    expect(buildEmbeddingText(chunk())).toBe(
+      `Aftercare.pdf > Aftercare > Sun protection\n\n${content}`,
+    );
+    expect(
+      buildEmbeddingText(chunk({ resourceName: 'Aftercare', headingPath: ['Aftercare', ''] })),
+    ).toBe(`Aftercare\n\n${content}`);
+  });
+});
+
 describe('toSearchDocument', () => {
   it('maps every chunk field and the vector, preserving citation metadata', () => {
     const source = chunk();
     const vector = placeholderVector(content, 8);
-    const document = toSearchDocument(source, vector, 8);
+    const document = toSearchDocument(source, embedding(vector), 8);
     expect(document.id).toBe(source.chunkId);
     expect(document).toMatchObject({
       courseId: 12,
@@ -80,22 +106,29 @@ describe('toSearchDocument', () => {
       moduleUrl: source.moduleUrl,
       headingPath: ['Aftercare', 'Sun protection'],
       contentVector: vector,
+      embeddingModel: 'text-embedding-3-small',
+      embeddingVersion: '1',
+      embeddingDimensions: 8,
+      embeddedAt: '2026-10-29T10:00:00.000Z',
     });
     expect(document).not.toHaveProperty('chunkId');
     expect(document).not.toHaveProperty('overlapTokens');
   });
 
   it('rejects an embedding of the wrong size', () => {
-    expect(() => toSearchDocument(chunk(), placeholderVector(content, 7), 8)).toThrow(
+    expect(() => toSearchDocument(chunk(), embedding(placeholderVector(content, 7)), 8)).toThrow(
       VectorDimensionError,
     );
+    expect(() =>
+      toSearchDocument(chunk(), embedding(placeholderVector(content, 8), 16), 8),
+    ).toThrow(VectorDimensionError);
   });
 
   it('reports invalid chunks by field name without quoting values', () => {
     const invalid = { ...chunk(), modifiedAt: 'Confidential: 1 Sept' };
     const failure = (() => {
       try {
-        toSearchDocument(invalid, placeholderVector(content, 8), 8);
+        toSearchDocument(invalid, embedding(placeholderVector(content, 8)), 8);
       } catch (error) {
         return error;
       }

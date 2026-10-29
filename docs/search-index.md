@@ -44,6 +44,9 @@ ambiguous.
 | `contentHash` / `sourceContentHash`                   | String             | filterable (change detection in phase 11)        |
 | `modifiedAt` / `indexedAt`                            | DateTimeOffset     | filterable, sortable                             |
 | `extractorVersion` / `chunkerVersion`                 | String             | filterable, facetable                            |
+| `embeddingModel` / `embeddingVersion`                 | String             | filterable, facetable (schema version 2)         |
+| `embeddingDimensions`                                 | Int32              | retrievable only (schema version 2)              |
+| `embeddedAt`                                          | DateTimeOffset     | filterable, sortable (schema version 2)          |
 | `allowedUserIds` / `allowedGroupIds`                  | Collection(String) | filterable, **never retrievable**                |
 | `isActive`                                            | Boolean            | filterable                                       |
 
@@ -54,8 +57,10 @@ ambiguous.
 - **Semantic ranking:** configuration `ehub-semantic` (title `title`, content `content`,
   keywords `headingPath`, `resourceName`, `moduleName`, `courseName`). Needs a billable tier with
   the semantic ranker enabled; set `AZURE_SEARCH_SEMANTIC_ENABLED=false` otherwise.
-- **Schema version:** recorded in the index description as `schema-version=1` and reported by
-  `search:validate-index`.
+- **Schema version:** recorded in the index description as `schema-version=2` and reported by
+  `search:validate-index`. Version 2 (phase 8) added the four embedding fields. An index created
+  with version 1 only lacks fields, which is a compatible change: run
+  `pnpm indexer search:create-index --apply-compatible-changes`.
 
 ## Security trimming
 
@@ -208,4 +213,4 @@ The default index name in code stays at the version in production until step 4.
   PowerShell: `$env:EHUB_LIVE_SEARCH_TESTS='1'; pnpm vitest run --project integration tests/integration/azure-search-live.test.ts`
 
 The placeholder vectors (`placeholderVector` in the test fixtures) are deterministic hashes
-with no meaning. They exist only in tests; real embeddings arrive in phase 8.
+with no meaning. They exist only in tests; real embeddings come from `docs/embeddings.md`.

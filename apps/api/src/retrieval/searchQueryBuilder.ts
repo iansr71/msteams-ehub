@@ -15,32 +15,31 @@ export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
 
 const courseId = z.number().int().positive().max(2_147_483_647);
 /** What a caller asks for. Authorisation (tenant and courses) is supplied by trusted code. */
-export const retrievalRequestSchema = z
-  .strictObject({
-    question: z
-      .string()
-      .transform((value) => replaceUnsafeCharacters(value).replace(/\s+/g, ' ').trim())
-      .pipe(z.string().min(1, { message: 'must not be empty.' }).max(MAX_QUERY_TEXT_CHARS)),
-    tenantId: z.string().min(1),
-    authorizedCourseIds: z.array(courseId).min(1, { message: 'no authorised courses.' }).max(1000),
-    courseIds: z.array(courseId).min(1).max(1000).optional(),
-    resourceTypes: z.array(z.enum(SEARCH_RESOURCE_TYPES)).min(1).optional(),
-    queryVector: z.array(z.number()).min(1).optional(),
-    mode: z.enum(RETRIEVAL_MODES).optional(),
-    topK: z.number().int().min(1).max(MAX_SEARCH_TOP).optional(),
-  })
-  .superRefine((request, ctx) => {
-    const mode = request.mode ?? (request.queryVector === undefined ? 'keyword' : 'hybrid');
-    if (mode !== 'keyword' && request.queryVector === undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['queryVector'],
-        message: `${mode} retrieval needs a query vector.`,
-      });
-    }
-  });
+export const retrievalRequestSchema = z.strictObject({
+  question: z
+    .string()
+    .transform((value) => replaceUnsafeCharacters(value).replace(/\s+/g, ' ').trim())
+    .pipe(z.string().min(1, { message: 'must not be empty.' }).max(MAX_QUERY_TEXT_CHARS)),
+  tenantId: z.string().min(1),
+  authorizedCourseIds: z.array(courseId).min(1, { message: 'no authorised courses.' }).max(1000),
+  courseIds: z.array(courseId).min(1).max(1000).optional(),
+  resourceTypes: z.array(z.enum(SEARCH_RESOURCE_TYPES)).min(1).optional(),
+  queryVector: z.array(z.number()).min(1).optional(),
+  mode: z.enum(RETRIEVAL_MODES).optional(),
+  topK: z.number().int().min(1).max(MAX_SEARCH_TOP).optional(),
+});
 export type RetrievalRequest = z.input<typeof retrievalRequestSchema>;
 export type ValidatedRetrievalRequest = z.output<typeof retrievalRequestSchema>;
+
+export class RetrievalRequestError extends Error {
+  readonly fields: readonly string[];
+
+  constructor(fields: readonly string[], message: string) {
+    super(message);
+    this.name = 'RetrievalRequestError';
+    this.fields = fields;
+  }
+}
 
 export interface BuiltSearchQuery {
   readonly query: SearchQuery;
@@ -63,6 +62,12 @@ export class SearchQueryBuilder {
   build(request: ValidatedRetrievalRequest): BuiltSearchQuery {
     const mode: RetrievalMode =
       request.mode ?? (request.queryVector === undefined ? 'keyword' : 'hybrid');
+    if (mode !== 'keyword' && request.queryVector === undefined) {
+      throw new RetrievalRequestError(
+        ['queryVector'],
+        `${mode} retrieval needs a query vector (configure embeddings or supply one).`,
+      );
+    }
     const topK = request.topK ?? this.#settings.topK;
     // Fetch extra candidates so the per-resource cap and thresholds can still fill top K.
     const candidates = Math.min(MAX_SEARCH_TOP, Math.max(this.#settings.candidateCount, topK));

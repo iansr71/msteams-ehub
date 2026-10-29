@@ -23,9 +23,9 @@ export const INDEXER_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
     missingNote: 'Needed for the search:* commands and, from phase 11, indexing.',
   },
   {
-    feature: 'azureOpenAI',
+    feature: 'embeddings',
     requirement: 'optional',
-    missingNote: 'Not required until embeddings are implemented (phase 8).',
+    missingNote: 'Needed for the embeddings:* commands and, from phase 11, indexing.',
   },
   { feature: 'extraction', requirement: 'optional' },
   { feature: 'chunking', requirement: 'optional' },

@@ -9,8 +9,18 @@ import {
   TEST_DIMENSIONS,
   seededSearch,
 } from '../retrieval/__fixtures__/corpus.js';
+import { FakeEmbeddingService } from '../../../../packages/shared/src/embeddings/__fixtures__/fakeEmbeddingService.js';
+import { createEmbeddingProvider } from '@ehub/shared/embeddings';
 import { createApiCommands, createEvaluationCommands } from './index.js';
 import type { RetrievalCommandDependencies } from './retrievalCommands.js';
+
+const OPENAI_KEY = 'fake-openai-key-0123456789abcdef0123';
+const embeddingEnv = {
+  AZURE_OPENAI_ENDPOINT: 'https://contoso.openai.azure.com',
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT: 'embed',
+  AZURE_OPENAI_API_KEY: OPENAI_KEY,
+  AZURE_OPENAI_EMBEDDING_DIMENSIONS: String(TEST_DIMENSIONS),
+};
 
 const env = {
   AZURE_SEARCH_ENDPOINT: 'https://search.example.test',
@@ -29,6 +39,10 @@ async function run(
   } = {},
 ) {
   const { client, service } = await seededSearch();
+  const embeddingService = new FakeEmbeddingService({
+    apiKey: OPENAI_KEY,
+    dimensions: TEST_DIMENSIONS,
+  });
   if (options.failSearch === true) {
     for (let i = 0; i < 10; i += 1) {
       service.scriptedResponses.push({ status: 401, body: '' });
@@ -49,6 +63,8 @@ async function run(
     env: options.env ?? env,
     cwd: '/work',
     createSearch: () => Promise.resolve(client),
+    createEmbedder: (settings) =>
+      createEmbeddingProvider(settings, { fetch: embeddingService.fetch }),
     readTextFile: (path) => {
       const text = options.files?.[path];
       return text === undefined ? Promise.reject(new Error('ENOENT')) : Promise.resolve(text);
@@ -67,8 +83,9 @@ async function run(
   const logText = logs.join('\n');
   for (const text of [stdout, logText]) {
     expect(text).not.toContain(API_KEY);
+    expect(text).not.toContain(OPENAI_KEY);
   }
-  return { exitCode, stdout, logText, service };
+  return { exitCode, stdout, logText, service, embeddingService };
 }
 
 describe('pnpm api retrieve', () => {
@@ -171,6 +188,38 @@ describe('pnpm api retrieve', () => {
     );
     expect(badVector.exitCode).toBe(1);
     expect(badVector.stdout).toContain('JSON array of numbers');
+  });
+});
+
+describe('pnpm api retrieve with embeddings configured', () => {
+  it('embeds the question and runs hybrid retrieval', async () => {
+    const result = await run(
+      'retrieve',
+      ['--question', 'laser eye protection', '--course-id', '12', '--json'],
+      {
+        env: { ...env, ...embeddingEnv },
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      mode: 'hybrid',
+      queryEmbeddingModel: 'text-embedding-3-small',
+    });
+    expect(result.embeddingService.requests).toHaveLength(1);
+    expect(result.stdout).not.toMatch(/"vector"|contentVector/);
+  });
+
+  it('refuses mismatched dimensions and partial embedding settings', async () => {
+    const mismatch = await run('retrieve', ['--question', 'x', '--course-id', '12'], {
+      env: { ...env, ...embeddingEnv, AZURE_OPENAI_EMBEDDING_DIMENSIONS: '1536' },
+    });
+    expect(mismatch.exitCode).toBe(1);
+    expect(mismatch.stdout).toContain('does not match AZURE_SEARCH_VECTOR_DIMENSIONS');
+    const partial = await run('retrieve', ['--question', 'x', '--course-id', '12'], {
+      env: { ...env, AZURE_OPENAI_EMBEDDING_DEPLOYMENT: 'embed' },
+    });
+    expect(partial.exitCode).toBe(1);
+    expect(partial.stdout).toContain('AZURE_OPENAI_ENDPOINT: Required.');
   });
 });
 

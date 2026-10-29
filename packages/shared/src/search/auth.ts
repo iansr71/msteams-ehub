@@ -23,19 +23,26 @@ export class SearchCredentialError extends Error {
   }
 }
 
-/** Admin API key. Intended for local development; deployed services use Entra ID. */
+/**
+ * API key sent as the `api-key` header (Azure AI Search and Azure OpenAI both use it). Intended
+ * for local development; deployed services use Entra ID.
+ */
 export function apiKeyAuthenticator(apiKey: string): SearchAuthenticator {
   if (apiKey.trim() === '') {
-    throw new SearchCredentialError('The Azure AI Search API key is empty.');
+    throw new SearchCredentialError('The API key is empty.');
   }
   registerSecretValue(apiKey);
   const headers = Object.freeze({ 'api-key': apiKey });
   return { mode: 'api-key', headers: () => Promise.resolve(headers) };
 }
 
-/** Microsoft Entra ID bearer tokens, e.g. from a Managed Identity. */
+/**
+ * Microsoft Entra ID bearer tokens, e.g. from a Managed Identity. The scope defaults to Azure AI
+ * Search; the embedding provider passes the Azure OpenAI scope.
+ */
 export function tokenCredentialAuthenticator(
   credential: SearchTokenCredential,
+  scope: string = SEARCH_TOKEN_SCOPE,
 ): SearchAuthenticator {
   return {
     mode: 'entra-id',
@@ -43,19 +50,15 @@ export function tokenCredentialAuthenticator(
       let result: Awaited<ReturnType<SearchTokenCredential['getToken']>>;
       try {
         result = await credential.getToken(
-          SEARCH_TOKEN_SCOPE,
+          scope,
           signal === undefined ? {} : { abortSignal: signal },
         );
       } catch {
         // The credential's own error can describe the environment in detail; keep it generic.
-        throw new SearchCredentialError(
-          'Could not obtain a Microsoft Entra ID token for Azure AI Search.',
-        );
+        throw new SearchCredentialError('Could not obtain a Microsoft Entra ID token.');
       }
       if (result === null || result.token === '') {
-        throw new SearchCredentialError(
-          'Could not obtain a Microsoft Entra ID token for Azure AI Search.',
-        );
+        throw new SearchCredentialError('Could not obtain a Microsoft Entra ID token.');
       }
       return { authorization: `Bearer ${result.token}` };
     },
