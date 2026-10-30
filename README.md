@@ -49,33 +49,34 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 
 ## Commands
 
-| Command                                                         | What it does                                                                             |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `pnpm build`                                                    | Compiles every package to `dist/` (TypeScript project builds)                            |
-| `pnpm clean`                                                    | Removes build output and coverage                                                        |
-| `pnpm format`                                                   | Formats the repository with Prettier                                                     |
-| `pnpm format:check`                                             | Fails if any file is not formatted                                                       |
-| `pnpm lint`                                                     | ESLint (type-aware, zero warnings allowed)                                               |
-| `pnpm typecheck`                                                | Strict type check of all packages and tests                                              |
-| `pnpm test`                                                     | All Vitest projects (unit, integration, security)                                        |
-| `pnpm test:unit`                                                | Unit tests inside `packages/*` and `apps/*`                                              |
-| `pnpm test:integration`                                         | Integration tests in `tests/integration`                                                 |
-| `pnpm test:security`                                            | Security regression tests in `tests/security`                                            |
-| `pnpm api health`                                               | API configuration health report (JSON)                                                   |
-| `pnpm indexer health`                                           | Indexer configuration health report (JSON)                                               |
-| `pnpm indexer moodle:ping`                                      | Checks the Moodle connection and that the service exposes exactly the expected functions |
-| `pnpm indexer moodle:courses`                                   | Lists courses; `--course-id <id[,id]>`, `--search <text>`, `--json`                      |
-| `pnpm indexer moodle:inspect --course-id <id>`                  | Sections, activities and file metadata for one course; `--json`                          |
-| `pnpm indexer extract:test --course-id <id> --resource-id <id>` | Downloads and extracts one resource; prints metadata, counts and a short preview         |
-| `pnpm indexer chunk:test --course-id <id> --resource-id <id>`   | Chunks one resource; prints chunk numbers, token counts and metadata (no chunk text)     |
-| `pnpm indexer search:create-index`                              | Creates the index if missing; never deletes; `--apply-compatible-changes`, `--json`      |
-| `pnpm indexer search:validate-index`                            | Compares the deployed index schema with this version; exit 1 unless it matches           |
-| `pnpm indexer search:health`                                    | Service reachability, index existence, document count and storage; `--json`              |
-| `pnpm indexer embeddings:health`                                | Checks the embedding deployment and that its dimensions match the search index           |
-| `pnpm indexer embeddings:test --text <text>`                    | Embeds one text; prints metadata and a 5-value preview (`--show-vector` for all)         |
-| `pnpm api retrieve --question <text> --course-id <id[,id]>`     | Filtered retrieval: ranks, scores, metadata; `--excerpts`, `--json` (see docs/retrieval) |
-| `pnpm api ask --question <text> --course-id <id[,id]>`          | Grounded answer from authorised content, with claims and sources (see docs/rag.md)       |
-| `pnpm evaluation retrieval --file <cases.json>`                 | Runs retrieval evaluation cases; hit@1/3/5 and MRR; exit 1 if any case fails             |
+| Command                                                         | What it does                                                                                      |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `pnpm build`                                                    | Compiles every package to `dist/` (TypeScript project builds)                                     |
+| `pnpm clean`                                                    | Removes build output and coverage                                                                 |
+| `pnpm format`                                                   | Formats the repository with Prettier                                                              |
+| `pnpm format:check`                                             | Fails if any file is not formatted                                                                |
+| `pnpm lint`                                                     | ESLint (type-aware, zero warnings allowed)                                                        |
+| `pnpm typecheck`                                                | Strict type check of all packages and tests                                                       |
+| `pnpm test`                                                     | All Vitest projects (unit, integration, security)                                                 |
+| `pnpm test:unit`                                                | Unit tests inside `packages/*` and `apps/*`                                                       |
+| `pnpm test:integration`                                         | Integration tests in `tests/integration`                                                          |
+| `pnpm test:security`                                            | Security regression tests in `tests/security`                                                     |
+| `pnpm api health`                                               | API configuration health report (JSON)                                                            |
+| `pnpm indexer health`                                           | Indexer configuration health report (JSON)                                                        |
+| `pnpm indexer moodle:ping`                                      | Checks the Moodle connection and that the service exposes exactly the expected functions          |
+| `pnpm indexer moodle:courses`                                   | Lists courses; `--course-id <id[,id]>`, `--search <text>`, `--json`                               |
+| `pnpm indexer moodle:inspect --course-id <id>`                  | Sections, activities and file metadata for one course; `--json`                                   |
+| `pnpm indexer extract:test --course-id <id> --resource-id <id>` | Downloads and extracts one resource; prints metadata, counts and a short preview                  |
+| `pnpm indexer chunk:test --course-id <id> --resource-id <id>`   | Chunks one resource; prints chunk numbers, token counts and metadata (no chunk text)              |
+| `pnpm indexer search:create-index`                              | Creates the index if missing; never deletes; `--apply-compatible-changes`, `--json`               |
+| `pnpm indexer search:validate-index`                            | Compares the deployed index schema with this version; exit 1 unless it matches                    |
+| `pnpm indexer search:health`                                    | Service reachability, index existence, document count and storage; `--json`                       |
+| `pnpm indexer embeddings:health`                                | Checks the embedding deployment and that its dimensions match the search index                    |
+| `pnpm indexer embeddings:test --text <text>`                    | Embeds one text; prints metadata and a 5-value preview (`--show-vector` for all)                  |
+| `pnpm api retrieve --question <text> --course-id <id[,id]>`     | Filtered retrieval: ranks, scores, metadata; `--excerpts`, `--json` (see docs/retrieval)          |
+| `pnpm api ask --question <text> --course-id <id[,id]>`          | Grounded answer from authorised content, with claims and sources (see docs/rag.md)                |
+| `pnpm evaluation answers --file <cases.json>`                   | Runs cases through the answer engine; fails any answer without a valid source (docs/citations.md) |
+| `pnpm evaluation retrieval --file <cases.json>`                 | Runs retrieval evaluation cases; hit@1/3/5 and MRR; exit 1 if any case fails                      |
 
 Validation gate used before every phase is committed:
 
@@ -160,6 +161,7 @@ Validated with Zod in `packages/shared/src/config`. Empty values are treated as 
 | `CHAT_MAX_OUTPUT_TOKENS` / `CHAT_REQUEST_TIMEOUT_MS` / `CHAT_MAX_RETRIES`    | chat          | Optional; 1200 / 60000 / 2                             |
 | `RAG_MAX_QUESTION_CHARS` / `RAG_MAX_CONTEXT_TOKENS` / `RAG_MAX_ANSWER_CHARS` | chat          | Optional; 1000 / 12000 / 4000                          |
 | `RAG_MIN_SUPPORTING_CHUNKS` / `RAG_MIN_TOP_RERANKER_SCORE`                   | chat          | Optional; 1 / off (calibrate)                          |
+| `CITATION_ALLOWED_HOSTS` / `CITATION_EXCERPT_CHARS`                          | chat          | Optional; Moodle host by default / 200                 |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING`                                      | observability | Secret, optional                                       |
 
 In production every `*_URL` / `*_ENDPOINT` variable must use https.

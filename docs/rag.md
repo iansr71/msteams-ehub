@@ -58,7 +58,8 @@ a safe failure, never a partial answer. A reply cut off at the token limit count
 the model's own warnings, the sources given to the model (metadata, no content), retrieval
 statistics and timings.
 
-Support checks applied before an answer is returned:
+Support checks applied before an answer is returned (phase 10 replaced these with the citation
+validation in `docs/citations.md`; the summary below is kept for history):
 
 - `insufficientEvidence: true` always yields the fixed message, whatever else the model wrote.
 - An answer with no claims, or with any claim citing no source, is refused as insufficient.

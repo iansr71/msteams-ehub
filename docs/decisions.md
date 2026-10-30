@@ -122,3 +122,12 @@ refusing the answer, because a link is not a claim. Invented source IDs make the
 their presence does not mean embeddings are configured. Retrieval uses query embeddings when
 `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` is set; `pnpm api ask` requires them because answers always
 use hybrid retrieval.
+
+## Unsupported claims are removed, not the whole answer (phase 10)
+
+Prompt 10 replaces the phase 9 rule (any unsupported claim refused the answer). Unsupported
+claims are removed when at least as many claims survive as are removed; otherwise the answer is
+refused. When anything was removed, the shown text is rebuilt from the surviving claims rather
+than the model's prose, because the prose may still state the removed content. Claim checks are
+mechanical (references, numbers, shared words): they catch fabricated pages, links, documents and
+figures, not subtle paraphrase errors, which the evaluation set and live testing must cover.

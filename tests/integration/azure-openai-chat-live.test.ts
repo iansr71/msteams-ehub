@@ -67,7 +67,11 @@ describe.skipIf(!enabled)('Azure OpenAI grounded answers (live)', () => {
     if (result.kind !== 'generated') {
       throw new Error('generation failed');
     }
-    return checker.check(result.answer, prompt.sources);
+    return checker.check(result.answer, prompt.sources, {
+      tenantId: 'tenant-1',
+      courseIds: new Set([12]),
+      allowedHosts: new Set(['ehub.example.test']),
+    });
   }
 
   it('answers a supported question with claims citing the passage', async () => {

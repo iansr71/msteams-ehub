@@ -74,14 +74,14 @@ const FATAL_SEARCH_CATEGORIES: ReadonlySet<string> = new Set([
   'dimension_mismatch',
 ]);
 
-class InputFileError extends Error {
+export class InputFileError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'InputFileError';
   }
 }
 
-async function defaultReadTextFile(path: string, maxBytes: number): Promise<string> {
+export async function defaultReadTextFile(path: string, maxBytes: number): Promise<string> {
   let size: number;
   try {
     const info = await stat(path);
@@ -101,7 +101,7 @@ async function defaultReadTextFile(path: string, maxBytes: number): Promise<stri
   return readFile(path, 'utf8');
 }
 
-function resolveInputPath(dependencies: RetrievalCommandDependencies, path: string): string {
+export function resolveInputPath(dependencies: RetrievalCommandDependencies, path: string): string {
   return resolve(dependencies.cwd ?? dependencies.env['INIT_CWD'] ?? process.cwd(), path);
 }
 

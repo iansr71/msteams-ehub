@@ -4,7 +4,13 @@ import { z } from 'zod';
 import type { RetrievedChunk } from '../retrieval/retrievalResultMapper.js';
 import type { RetrievalMode } from '../retrieval/searchQueryBuilder.js';
 import { INSUFFICIENT_EVIDENCE_MESSAGE } from './answerSchema.js';
-import { AnswerSupportChecker, type SupportWarning } from './answerSupportChecker.js';
+import {
+  AnswerSupportChecker,
+  answerHasValidSources,
+  type CheckedClaim,
+  type SupportWarning,
+} from './answerSupportChecker.js';
+import type { Citation } from './citationBuilder.js';
 import { isChatModelError, type ChatErrorCategory } from './chatModelProvider.js';
 import type {
   GenerationFailure,
@@ -93,10 +99,15 @@ export interface RagAnswer {
   readonly status: RagStatus;
   /** The answer, the fixed insufficient-evidence message, or a safe failure message. */
   readonly answer: string;
-  readonly claims: readonly { readonly text: string; readonly chunkIds: readonly string[] }[];
+  /** Supported claims only, with the citation numbers and chunk IDs they rely on. */
+  readonly claims: readonly CheckedClaim[];
+  /** Validated citations built from retrieval metadata, numbered by first use. */
+  readonly citations: readonly Citation[];
+  /** Claims the model made that were removed as unsupported. */
+  readonly removedClaims: number;
   readonly insufficientEvidence: boolean;
   readonly conflictingSources: boolean;
-  readonly warnings: readonly (SupportWarning | SupportShortfall)[];
+  readonly warnings: readonly (SupportWarning | SupportShortfall | 'invariant_violation')[];
   readonly modelWarnings: readonly string[];
   /** Chunks given to the model, for citation validation (phase 10). */
   readonly sources: readonly RagSource[];
@@ -122,6 +133,8 @@ export interface RagServiceOptions {
   readonly generator: GroundedAnswerGenerator;
   readonly modelName: string;
   readonly supportChecker?: AnswerSupportChecker;
+  /** Hosts allowed in citation links (lower case); none means citations carry no links. */
+  readonly allowedHosts?: ReadonlySet<string>;
   readonly rateLimiter?: RagRateLimiter;
   readonly logger?: Logger;
 }
@@ -183,6 +196,8 @@ export class RagService {
       model: this.#options.modelName,
       modelWarnings: [] as readonly string[],
       claims: [] as RagAnswer['claims'],
+      citations: [] as RagAnswer['citations'],
+      removedClaims: 0,
       conflictingSources: false,
     };
     const finish = (answer: RagAnswer): RagAnswer => {
@@ -193,6 +208,8 @@ export class RagService {
         questionCharacters: question.length,
         sources: answer.sources.length,
         claims: answer.claims.length,
+        citations: answer.citations.length,
+        removedClaims: answer.removedClaims,
         warnings: answer.warnings,
         generationAttempts: answer.generationAttempts,
         courses: user.selectedCourseIds?.length ?? user.authorizedCourseIds.length,
@@ -290,12 +307,33 @@ export class RagService {
       });
     }
 
-    const checked = this.#checker.check(generation.answer, prompt.sources);
+    const checked = this.#checker.check(generation.answer, prompt.sources, {
+      tenantId: user.tenantId,
+      courseIds: new Set(user.selectedCourseIds ?? user.authorizedCourseIds),
+      allowedHosts: this.#options.allowedHosts ?? new Set(),
+    });
+    // Defence in depth: whatever the checks above decided, an answer without a valid source is
+    // never returned.
+    if (!answerHasValidSources(checked)) {
+      return finish({
+        ...base,
+        status: 'insufficient_evidence',
+        answer: INSUFFICIENT_EVIDENCE_MESSAGE,
+        insufficientEvidence: true,
+        warnings: ['invariant_violation'],
+        sources,
+        retrieval,
+        generationAttempts: generation.attempts,
+        durationMs: Date.now() - started,
+      });
+    }
     return finish({
       model: this.#options.modelName,
       status: checked.insufficientEvidence ? 'insufficient_evidence' : 'answered',
       answer: checked.answer,
       claims: checked.claims,
+      citations: checked.citations,
+      removedClaims: checked.removedClaims,
       insufficientEvidence: checked.insufficientEvidence,
       conflictingSources: checked.conflictingSources,
       warnings: checked.warnings,

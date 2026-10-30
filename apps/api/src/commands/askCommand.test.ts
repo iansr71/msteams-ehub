@@ -88,7 +88,8 @@ describe('pnpm api ask', () => {
     expect(result.stdout).toContain(
       '1. Sunscreen should be reapplied every two hours after a peel. [1]',
     );
-    expect(result.stdout).toContain('[1] course 12 | Aftercare > Sun protection');
+    expect(result.stdout).toContain('Sources:');
+    expect(result.stdout).toContain('[1] Aftercare — Consultation Skills > Aftercare');
     expect(result.stdout).not.toContain(SECRET_SENTENCE);
   });
 

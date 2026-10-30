@@ -156,6 +156,13 @@ describe('pnpm api ask over HTTPS', () => {
     };
     expect(parsed).toMatchObject({ status: 'answered', retrieval: { mode: 'hybrid' } });
     expect(parsed.sources.every((source) => source.courseId === 12)).toBe(true);
+    const cited = JSON.parse(result.stdout) as {
+      citations: { citationId: number; courseId: number; sourceUrl?: string }[];
+    };
+    expect(cited.citations.map((citation) => citation.citationId)).toEqual([1]);
+    expect(cited.citations[0]?.courseId).toBe(12);
+    // No approved hosts are configured in this run, so no link is shown.
+    expect(cited.citations[0]?.sourceUrl).toBeUndefined();
     expect(result.stderr).toContain('Question answered.');
     expectClean(result);
     const prompt =

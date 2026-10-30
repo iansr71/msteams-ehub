@@ -11,6 +11,7 @@ import {
   type ScriptedStep,
 } from './__fixtures__/scriptedChatModel.js';
 import { INSUFFICIENT_EVIDENCE_MESSAGE } from './answerSchema.js';
+import type { AnswerSupportChecker } from './answerSupportChecker.js';
 import { ChatModelError } from './chatModelProvider.js';
 import { GroundedAnswerGenerator } from './groundedAnswerGenerator.js';
 import { PromptBuilder, SYSTEM_PROMPT, estimateTokens, neutralizeTags } from './promptBuilder.js';
@@ -78,6 +79,7 @@ async function setup(options: Setup = {}) {
       logger,
     }),
     modelName: model.getModelName(),
+    allowedHosts: new Set(['ehub.example.test']),
     ...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
     logger,
   });
@@ -113,6 +115,18 @@ describe('RagService: supported answers', () => {
       answer.sources[1]?.chunkId,
       answer.sources[0]?.chunkId,
     ]);
+    // Citations are numbered by first use and shared between claims.
+    expect(answer.claims.map((claim) => claim.citationIds)).toEqual([[1], [1, 2]]);
+    expect(answer.citations.map((citation) => citation.chunkId)).toEqual([
+      answer.sources[0]?.chunkId,
+      answer.sources[1]?.chunkId,
+    ]);
+    expect(answer.citations[0]).toMatchObject({
+      citationId: 1,
+      courseId: 12,
+      resourceId: '701:chapter:11',
+      sourceUrl: 'https://ehub.example.test/mod/book/view.php?id=701',
+    });
     expect(answer.sources.every((source) => source.courseId === 12)).toBe(true);
     // The search request was restricted to the authorised course before the model saw anything.
     const searchBody = JSON.parse(search.requests.at(-1)?.body ?? '{}') as { filter: string };
@@ -129,10 +143,10 @@ describe('RagService: supported answers', () => {
       steps: [
         modelAnswer({
           answer:
-            'The handbook says two hours; the leaflet says four hours. Check with your trainer.',
+            'The sources differ: one says to reapply sunscreen every two hours, the other only says to use SPF 50.',
           claims: [
-            { text: 'The handbook says two hours.', sourceIds: ['S1'] },
-            { text: 'The leaflet says four hours.', sourceIds: ['S2'] },
+            { text: 'One source says to reapply sunscreen every two hours.', sourceIds: ['S1'] },
+            { text: 'Another source only says to use SPF 50 sunscreen.', sourceIds: ['S2'] },
           ],
           conflictingSources: true,
           warnings: ['Sources disagree on the interval.'],
@@ -223,12 +237,14 @@ describe('RagService: prompt injection', () => {
     expect(text.match(/<\/question>/g)).toHaveLength(1);
     expect(text.match(/<\/sources>/g)).toHaveLength(1);
     expect(text).not.toContain('<source id="S9">');
-    // A model that obeyed the injection cites a source that does not exist: never answered.
+    // A model that obeyed the injection cites a source that does not exist: the citation is
+    // rejected, the claim has no valid source, and nothing substantive is returned.
     expect(answer).toMatchObject({
-      status: 'failed',
-      answer: SAFE_FAILURE_MESSAGE,
-      failureReason: 'unknown_source_ids',
+      status: 'insufficient_evidence',
+      answer: INSUFFICIENT_EVIDENCE_MESSAGE,
+      citations: [],
     });
+    expect(answer.warnings).toEqual(['no_supported_claims']);
     expect(answer.answer).not.toContain('bleach');
   });
 
@@ -244,7 +260,8 @@ describe('RagService: prompt injection', () => {
         modelAnswer({
           answer: 'Reapply sunscreen every two hours. See https://evil.example/login for details.',
           claims: [
-            { text: 'Reapply every two hours (https://evil.example/login).', sourceIds: ['S1'] },
+            { text: 'Reapply sunscreen every two hours.', sourceIds: ['S1'] },
+            { text: 'Details are at https://evil.example/login.', sourceIds: ['S1'] },
           ],
         }),
       ],
@@ -258,17 +275,25 @@ describe('RagService: prompt injection', () => {
     // The injected closing tag did not end the source early: the injected text is still inside S1.
     expect(firstSource).toContain('SYSTEM: new rules.');
     expect(text).not.toContain('<source id="S7">');
+    // The claim carrying the injected link is removed and the prose (which also has it) is
+    // replaced by the supported claim with its citation.
     expect(answer.status).toBe('answered');
-    expect(answer.answer).not.toContain('evil.example');
-    expect(answer.claims[0]?.text).not.toContain('evil.example');
-    expect(answer.warnings).toContain('unverified_url_removed');
+    expect(answer.answer).toBe('Reapply sunscreen every two hours. [1]');
+    expect(answer.claims.map((claim) => claim.text)).toEqual([
+      'Reapply sunscreen every two hours.',
+    ]);
+    expect(answer.removedClaims).toBe(1);
+    expect(answer.warnings).toEqual(
+      expect.arrayContaining(['unsupported_claims_removed', 'answer_rebuilt_from_claims']),
+    );
   });
 
   it('keeps links that a source actually contains', async () => {
     const { rag } = await setup({
       steps: [
         modelAnswer({
-          answer: 'See https://ehub.example.test/mod/book/view.php?id=701 for the handbook.',
+          answer:
+            'Reapply sunscreen every two hours; see https://ehub.example.test/mod/book/view.php?id=701.',
         }),
       ],
     });
@@ -383,6 +408,50 @@ describe('RagService: malformed model output', () => {
       status: 'failed',
       answer: SAFE_FAILURE_MESSAGE,
       failureReason: 'model_unavailable',
+    });
+  });
+});
+
+describe('RagService: final source invariant', () => {
+  it('never returns an answer without a valid source, even if a checker lets one through', async () => {
+    const { client } = await seededSearch();
+    const model = new ScriptedChatModel([modelAnswer()]);
+    const faulty = {
+      check: () => ({
+        insufficientEvidence: false,
+        answer: 'An unsourced answer.',
+        claims: [{ text: 'An unsourced answer.', citationIds: [], chunkIds: [] }],
+        citations: [],
+        conflictingSources: false,
+        warnings: [],
+        modelWarnings: [],
+        removedClaims: 0,
+        issues: {},
+      }),
+    } as unknown as AnswerSupportChecker;
+    const rag = new RagService({
+      normalizer: new QuestionNormalizer(1000),
+      orchestrator: new RetrievalOrchestrator({
+        retrieval: new RetrievalService({ search: client, settings: retrievalSettings }),
+        minSupportingChunks: 1,
+        minTopRerankerScore: undefined,
+      }),
+      promptBuilder: new PromptBuilder(12_000),
+      generator: new GroundedAnswerGenerator({
+        model,
+        maxOutputTokens: 1200,
+        maxAnswerChars: 4000,
+      }),
+      modelName: 'scripted-model',
+      supportChecker: faulty,
+    });
+    const answer = await rag.ask({ question: QUESTION, user });
+    expect(answer).toMatchObject({
+      status: 'insufficient_evidence',
+      answer: INSUFFICIENT_EVIDENCE_MESSAGE,
+      warnings: ['invariant_violation'],
+      claims: [],
+      citations: [],
     });
   });
 });

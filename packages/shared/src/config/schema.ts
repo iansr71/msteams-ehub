@@ -217,6 +217,7 @@ export const CHAT_DEFAULTS = {
   maxContextTokens: 12_000,
   maxAnswerChars: 4_000,
   minSupportingChunks: 1,
+  citationExcerptChars: 200,
 } as const;
 
 export const CHAT_RESPONSE_FORMATS = ['json_schema', 'json_object'] as const;
@@ -249,6 +250,37 @@ export const chatConfigShape = {
   /** Fewer retrieved chunks than this and no answer is attempted. */
   RAG_MIN_SUPPORTING_CHUNKS: boundedInteger(1, 20, CHAT_DEFAULTS.minSupportingChunks),
   /** Optional: the best chunk's semantic reranker score (0-4) must reach this. */
+  /**
+   * Hosts allowed in citation links, comma-separated (e.g. ehub.skinrenewal.co.za). When unset,
+   * the host of MOODLE_BASE_URL is used; when neither is set, citations carry no links.
+   */
+  CITATION_ALLOWED_HOSTS: z
+    .string()
+    .trim()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((host) => host.trim().toLowerCase())
+        .filter((host) => host !== ''),
+    )
+    .pipe(
+      z
+        .array(
+          z
+            .string()
+            .regex(
+              /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::\d{1,5})?$/,
+              {
+                message: 'Must be a comma-separated list of host names.',
+              },
+            ),
+        )
+        .min(1, { message: 'Must list at least one host.' })
+        .max(20),
+    )
+    .optional(),
+  /** Maximum characters of the source excerpt shown with each citation. */
+  CITATION_EXCERPT_CHARS: boundedInteger(50, 500, CHAT_DEFAULTS.citationExcerptChars),
   RAG_MIN_TOP_RERANKER_SCORE: z.coerce
     .number({ message: 'Must be a number.' })
     .min(0, { message: 'Must be between 0 and 4.' })

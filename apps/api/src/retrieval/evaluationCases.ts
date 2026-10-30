@@ -34,6 +34,8 @@ export const evaluationCaseSchema = z
     /** Optional narrowing within the authorised courses, as a user's course picker would. */
     courseIds: z.array(courseId).min(1).max(1000).optional(),
     resourceTypes: z.array(z.enum(SEARCH_RESOURCE_TYPES)).min(1).optional(),
+    /** Answer evaluation: the case passes only if the answer is the insufficient-evidence response. */
+    expectInsufficientEvidence: z.boolean().default(false),
     /** Free text for the people maintaining the file; never used in scoring. */
     notes: z.string().max(1000).optional(),
   })

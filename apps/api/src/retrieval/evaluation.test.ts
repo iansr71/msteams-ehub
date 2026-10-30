@@ -163,6 +163,7 @@ const makeCase = (id: string, overrides: Partial<EvaluationCase> = {}): Evaluati
   expectedCourseIds: [],
   expectedResourceIds: [],
   forbiddenResourceIds: [],
+  expectInsufficientEvidence: false,
   ...overrides,
 });
 

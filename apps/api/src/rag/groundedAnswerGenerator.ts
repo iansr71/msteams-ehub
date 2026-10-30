@@ -8,8 +8,7 @@ import {
 import type { ChatMessage, ChatModelProvider } from './chatModelProvider.js';
 import type { BuiltPrompt } from './promptBuilder.js';
 
-export type GenerationFailure =
-  'invalid_output' | 'truncated_output' | 'unknown_source_ids' | 'answer_too_long';
+export type GenerationFailure = 'invalid_output' | 'truncated_output' | 'answer_too_long';
 
 export type GenerationResult =
   | { readonly kind: 'generated'; readonly answer: ModelAnswer; readonly attempts: number }
@@ -40,9 +39,9 @@ function stripFence(content: string): string {
 }
 
 /**
- * Asks the model for a structured answer and validates it with Zod: shape, lengths, and that
- * every cited source ID is one that was provided. One bounded repair attempt is made; after
- * that the caller gets a failure and returns a safe response.
+ * Asks the model for a structured answer and validates it with Zod (shape and lengths). One
+ * bounded repair attempt is made; after that the caller gets a failure and returns a safe
+ * response.
  */
 export class GroundedAnswerGenerator {
   readonly #options: GroundedAnswerGeneratorOptions;
@@ -61,7 +60,7 @@ export class GroundedAnswerGenerator {
       maxOutputTokens: this.#options.maxOutputTokens,
       ...(signal === undefined ? {} : { signal }),
     });
-    const initial = this.#validate(first.content, first.finishReason === 'length', known);
+    const initial = this.#validate(first.content, first.finishReason === 'length');
     if (initial.answer !== undefined) {
       return { kind: 'generated', answer: initial.answer, attempts: 1 };
     }
@@ -88,7 +87,7 @@ export class GroundedAnswerGenerator {
       maxOutputTokens: this.#options.maxOutputTokens,
       ...(signal === undefined ? {} : { signal }),
     });
-    const repaired = this.#validate(second.content, second.finishReason === 'length', known);
+    const repaired = this.#validate(second.content, second.finishReason === 'length');
     if (repaired.answer !== undefined) {
       return { kind: 'generated', answer: repaired.answer, attempts: 2 };
     }
@@ -98,7 +97,7 @@ export class GroundedAnswerGenerator {
     return { kind: 'failed', reason: repaired.failure ?? 'invalid_output', attempts: 2 };
   }
 
-  #validate(content: string, truncated: boolean, known: ReadonlySet<string>): Validation {
+  #validate(content: string, truncated: boolean): Validation {
     if (truncated) {
       return {
         failure: 'truncated_output',
@@ -123,17 +122,8 @@ export class GroundedAnswerGenerator {
           ),
       };
     }
-    const unknown = [
-      ...new Set(
-        parsed.data.claims.flatMap((claim) => claim.sourceIds).filter((id) => !known.has(id)),
-      ),
-    ];
-    if (unknown.length > 0) {
-      return {
-        failure: 'unknown_source_ids',
-        problems: [`These source IDs were not provided: ${unknown.slice(0, 10).join(', ')}.`],
-      };
-    }
+    // Citations of sources that were not provided are rejected later, per claim, by the
+    // citation validator (phase 10), so they do not make the whole reply invalid here.
     if (parsed.data.answer.length > this.#options.maxAnswerChars) {
       return {
         failure: 'answer_too_long',

@@ -1,5 +1,6 @@
 import type { CommandDefinition, EnvironmentSource } from '@ehub/shared';
 
+import { createAnswerEvaluationCommand } from './answerEvaluationCommand.js';
 import { createAskCommand, type AskCommandDependencies } from './askCommand.js';
 import { createHealthCommand } from './health.js';
 import {
@@ -33,5 +34,6 @@ export function createEvaluationCommands(
   const env = dependencies.env ?? process.env;
   return {
     retrieval: createRetrievalEvaluationCommand(dependencies.retrieval ?? { env }),
+    answers: createAnswerEvaluationCommand(dependencies.ask ?? dependencies.retrieval ?? { env }),
   };
 }

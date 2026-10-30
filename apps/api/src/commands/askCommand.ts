@@ -14,6 +14,9 @@ import {
 import { z } from 'zod';
 
 import { isChatModelError, type ChatModelProvider } from '../rag/chatModelProvider.js';
+import { formatAnswerAsText } from '../rag/answerFormatter.js';
+import { AnswerSupportChecker } from '../rag/answerSupportChecker.js';
+import { resolveAllowedHosts } from '../rag/citationValidator.js';
 import { createChatProvider } from '../rag/factory.js';
 import { GroundedAnswerGenerator } from '../rag/groundedAnswerGenerator.js';
 import { PromptBuilder } from '../rag/promptBuilder.js';
@@ -42,6 +45,7 @@ const askArgs = z
     question: z.string(),
     'course-id': courseIdListSchema,
     'selected-course-id': courseIdListSchema.optional(),
+    excerpts: z.boolean().optional(),
     json: z.boolean().optional(),
   })
   .strict();
@@ -49,7 +53,7 @@ const askArgs = z
 /** The development command's caller; real user identities arrive with Entra SSO (phase 13). */
 const CLI_USER_ID = 'cli-operator';
 
-function describeAskFailure(error: unknown): FailureReport | undefined {
+export function describeAskFailure(error: unknown): FailureReport | undefined {
   if (error instanceof RagAuthorizationError) {
     return { status: 'error', error: { category: error.code, message: error.message } };
   }
@@ -72,35 +76,29 @@ function describeAskFailure(error: unknown): FailureReport | undefined {
   return describeFailure(error);
 }
 
-function location(source: RagAnswer['sources'][number]): string {
-  if (source.pageNumber !== undefined) {
-    return ` p.${String(source.pageNumber)}${source.pageNumberEnd === undefined ? '' : `-${String(source.pageNumberEnd)}`}`;
-  }
-  return source.slideNumber === undefined ? '' : ` slide ${String(source.slideNumber)}`;
-}
-
-export function renderAnswerText(answer: RagAnswer): string {
-  const sourceIndex = new Map(answer.sources.map((source, index) => [source.chunkId, index + 1]));
+/**
+ * The answer with validated citations: claims carry citation numbers, and sources come only
+ * from validated citations (retrieval metadata, approved links). `--excerpts` adds the short
+ * sanitised excerpt for each citation.
+ */
+export function renderAnswerText(answer: RagAnswer, options: { excerpts: boolean }): string {
   const lines = [
     `Status: ${answer.status}${answer.failureReason === undefined ? '' : ` (${answer.failureReason})`}`,
     '',
-    // The answer is model output grounded in untrusted content: shown, but cleaned for a terminal.
-    ...answer.answer.split('\n').map((line) => sanitizeText(line, 2_000)),
+    formatAnswerAsText(
+      { answer: answer.answer, claims: answer.claims, citations: answer.citations },
+      options,
+    ),
   ];
   if (answer.claims.length > 0) {
     lines.push('', 'Claims:');
     answer.claims.forEach((claim, index) => {
-      const refs = claim.chunkIds.map((id) => `[${String(sourceIndex.get(id) ?? '?')}]`).join('');
+      const refs = claim.citationIds.map((id) => `[${String(id)}]`).join('');
       lines.push(`  ${String(index + 1)}. ${sanitizeText(claim.text, 1_000)} ${refs}`);
     });
   }
-  if (answer.sources.length > 0) {
-    lines.push('', 'Sources given to the model:');
-    answer.sources.forEach((source, index) => {
-      lines.push(
-        `  [${String(index + 1)}] course ${String(source.courseId)} | ${sanitizeText(source.resourceName)} > ${sanitizeText(source.title)}${location(source)} | ${sanitizeText(source.moduleUrl ?? source.sourceUrl ?? '-', 300)}`,
-      );
-    });
+  if (answer.removedClaims > 0) {
+    lines.push('', `Removed as unsupported: ${String(answer.removedClaims)} claim(s)`);
   }
   const warnings = [...answer.warnings, ...answer.modelWarnings.map((w) => `model: ${w}`)];
   if (warnings.length > 0) {
@@ -108,15 +106,54 @@ export function renderAnswerText(answer: RagAnswer): string {
   }
   lines.push(
     '',
-    `Model ${sanitizeText(answer.model, 64)}, ${String(answer.generationAttempts)} attempt(s), ${answer.retrieval === undefined ? 'no retrieval' : `${answer.retrieval.mode} retrieval of ${String(answer.retrieval.returned)} chunks`}, ${String(answer.durationMs)} ms`,
+    `Model ${sanitizeText(answer.model, 64)}, ${String(answer.generationAttempts)} attempt(s), ${answer.retrieval === undefined ? 'no retrieval' : `${answer.retrieval.mode} retrieval of ${String(answer.retrieval.returned)} chunks, ${String(answer.sources.length)} given to the model`}, ${String(answer.durationMs)} ms`,
   );
   return redactString(lines.join('\n'));
+}
+
+/** Builds the answer engine from validated configuration (variable names only on failure). */
+export async function openRagService(
+  dependencies: AskCommandDependencies,
+  logger: Logger,
+): Promise<{ rag: RagService; tenantId: string }> {
+  const chatSettings = loadConfig(chatConfigSchema, dependencies.env);
+  // Answers always use hybrid retrieval, so embeddings are required here.
+  const { service: retrieval, tenantId } = await openRetrieval(dependencies, logger, {
+    requireEmbeddings: true,
+  });
+  const model = await (
+    dependencies.createChat ??
+    ((settings: ChatConfig, log: Logger) => createChatProvider(settings, { logger: log }))
+  )(chatSettings, logger);
+  const rag = new RagService({
+    normalizer: new QuestionNormalizer(chatSettings.RAG_MAX_QUESTION_CHARS),
+    orchestrator: new RetrievalOrchestrator({
+      retrieval,
+      minSupportingChunks: chatSettings.RAG_MIN_SUPPORTING_CHUNKS,
+      minTopRerankerScore: chatSettings.RAG_MIN_TOP_RERANKER_SCORE,
+    }),
+    promptBuilder: new PromptBuilder(chatSettings.RAG_MAX_CONTEXT_TOKENS),
+    generator: new GroundedAnswerGenerator({
+      model,
+      maxOutputTokens: chatSettings.CHAT_MAX_OUTPUT_TOKENS,
+      maxAnswerChars: chatSettings.RAG_MAX_ANSWER_CHARS,
+      logger,
+    }),
+    modelName: model.getModelName(),
+    supportChecker: new AnswerSupportChecker({ excerptChars: chatSettings.CITATION_EXCERPT_CHARS }),
+    allowedHosts: resolveAllowedHosts(
+      chatSettings.CITATION_ALLOWED_HOSTS,
+      dependencies.env['MOODLE_BASE_URL'],
+    ),
+    logger,
+  });
+  return { rag, tenantId };
 }
 
 export function createAskCommand(dependencies: AskCommandDependencies): CommandDefinition {
   return {
     description:
-      'Answer a question from authorised E-Hub content --question <text> --course-id <id[,id]> [--selected-course-id <id[,id]>] [--json].',
+      'Answer a question from authorised E-Hub content with validated citations --question <text> --course-id <id[,id]> [--selected-course-id <id[,id]>] [--excerpts] [--json].',
     run: (context) =>
       withErrorHandling(
         context,
@@ -128,38 +165,12 @@ export function createAskCommand(dependencies: AskCommandDependencies): CommandD
               question: 'string',
               'course-id': 'string[]',
               'selected-course-id': 'string[]',
+              excerpts: 'boolean',
               json: 'boolean',
             },
             askArgs,
           );
-          const chatSettings = loadConfig(chatConfigSchema, dependencies.env);
-          // Answers always use hybrid retrieval, so embeddings are required here.
-          const { service: retrieval, tenantId } = await openRetrieval(
-            dependencies,
-            context.logger,
-            { requireEmbeddings: true },
-          );
-          const model = await (
-            dependencies.createChat ??
-            ((settings: ChatConfig, logger: Logger) => createChatProvider(settings, { logger }))
-          )(chatSettings, context.logger);
-          const rag = new RagService({
-            normalizer: new QuestionNormalizer(chatSettings.RAG_MAX_QUESTION_CHARS),
-            orchestrator: new RetrievalOrchestrator({
-              retrieval,
-              minSupportingChunks: chatSettings.RAG_MIN_SUPPORTING_CHUNKS,
-              minTopRerankerScore: chatSettings.RAG_MIN_TOP_RERANKER_SCORE,
-            }),
-            promptBuilder: new PromptBuilder(chatSettings.RAG_MAX_CONTEXT_TOKENS),
-            generator: new GroundedAnswerGenerator({
-              model,
-              maxOutputTokens: chatSettings.CHAT_MAX_OUTPUT_TOKENS,
-              maxAnswerChars: chatSettings.RAG_MAX_ANSWER_CHARS,
-              logger: context.logger,
-            }),
-            modelName: model.getModelName(),
-            logger: context.logger,
-          });
+          const { rag, tenantId } = await openRagService(dependencies, context.logger);
           const answer = await rag.ask({
             question: args.question,
             user: {
@@ -176,7 +187,7 @@ export function createAskCommand(dependencies: AskCommandDependencies): CommandD
           context.stdout(
             args.json === true
               ? redactString(JSON.stringify(answer, null, 2))
-              : renderAnswerText(answer),
+              : renderAnswerText(answer, { excerpts: args.excerpts === true }),
           );
           return answer.status === 'failed' ? EXIT_FAILURE : EXIT_OK;
         },
