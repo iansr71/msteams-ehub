@@ -11,7 +11,6 @@ import {
   azureSearchConfigSchema,
   courseIdListSchema,
   embeddingConfigSchema,
-  getConfigFeatureStatus,
   loadConfig,
   parseCommandArgs,
   redactString,
@@ -106,7 +105,7 @@ function resolveInputPath(dependencies: RetrievalCommandDependencies, path: stri
   return resolve(dependencies.cwd ?? dependencies.env['INIT_CWD'] ?? process.cwd(), path);
 }
 
-interface RetrievalSetup {
+export interface RetrievalSetup {
   readonly service: RetrievalService;
   readonly tenantId: string;
 }
@@ -115,9 +114,10 @@ interface RetrievalSetup {
  * Validates configuration (names only on failure) and builds the retrieval service. The tenant
  * comes from AZURE_TENANT_ID, the tenant the indexer stamps on every chunk.
  */
-async function openRetrieval(
+export async function openRetrieval(
   dependencies: RetrievalCommandDependencies,
   logger: Logger,
+  options: { readonly requireEmbeddings?: boolean } = {},
 ): Promise<RetrievalSetup> {
   const searchConfig = loadConfig(azureSearchConfigSchema, dependencies.env);
   const retrievalConfig = loadConfig(retrievalConfigSchema, dependencies.env);
@@ -133,6 +133,7 @@ async function openRetrieval(
     dependencies,
     searchConfig.AZURE_SEARCH_VECTOR_DIMENSIONS,
     logger,
+    options.requireEmbeddings === true,
   );
   const search = await createSearch(searchConfig, logger);
   return {
@@ -147,16 +148,20 @@ async function openRetrieval(
 }
 
 /**
- * Query embeddings when the embedding settings are configured; keyword retrieval when they are
- * absent. Partly configured settings are an error rather than a silent fallback, and the
+ * Query embeddings when an embedding deployment is configured (or required); keyword retrieval
+ * otherwise. Partly configured settings are an error rather than a silent fallback, and the
  * embedding size must match the index.
  */
 async function openQueryEmbedder(
   dependencies: RetrievalCommandDependencies,
   indexDimensions: number,
   logger: Logger,
+  required: boolean,
 ): Promise<QueryEmbedder | undefined> {
-  if (getConfigFeatureStatus('embeddings', dependencies.env).state === 'missing') {
+  // The embedding deployment is the switch: AZURE_OPENAI_ENDPOINT and the key are shared with
+  // the chat deployment, so their presence alone does not mean embeddings are wanted.
+  const deployment = dependencies.env['AZURE_OPENAI_EMBEDDING_DEPLOYMENT']?.trim() ?? '';
+  if (!required && deployment === '') {
     return undefined;
   }
   const settings = loadConfig(embeddingConfigSchema, dependencies.env);
@@ -172,7 +177,7 @@ async function openQueryEmbedder(
   )(settings, logger);
 }
 
-interface FailureReport {
+export interface FailureReport {
   readonly status: 'error';
   readonly error: {
     readonly category: string;
@@ -182,7 +187,7 @@ interface FailureReport {
   };
 }
 
-function describeFailure(error: unknown): FailureReport | undefined {
+export function describeFailure(error: unknown): FailureReport | undefined {
   if (error instanceof ConfigValidationError) {
     return {
       status: 'error',
@@ -245,10 +250,11 @@ function renderFailure(report: FailureReport, action: string): string {
   return redactString(lines.join('\n'));
 }
 
-async function withErrorHandling(
+export async function withErrorHandling(
   context: CommandContext,
   action: string,
   body: () => Promise<number>,
+  describe: (error: unknown) => FailureReport | undefined = describeFailure,
 ): Promise<number> {
   const json = context.args.includes('--json');
   try {
@@ -258,7 +264,7 @@ async function withErrorHandling(
       context.stdout(sanitizeText(error.message, 200));
       return EXIT_USAGE;
     }
-    const report = describeFailure(error);
+    const report = describe(error);
     if (report === undefined) {
       throw error;
     }
@@ -274,7 +280,7 @@ async function withErrorHandling(
 }
 
 /** Accepts repeated flags and comma-separated lists: `--x a,b --x c`. */
-const commaList = z
+export const commaList = z
   .array(z.string())
   .transform((values) => values.flatMap((value) => value.split(',')).map((value) => value.trim()));
 

@@ -19,6 +19,11 @@
       "@ehub/source": "./src/embeddings/index.ts",
       "types": "./dist/embeddings/index.d.ts",
       "default": "./dist/embeddings/index.js"
+    },
+    "./http": {
+      "@ehub/source": "./src/http/retry.ts",
+      "types": "./dist/http/retry.d.ts",
+      "default": "./dist/http/retry.js"
     }
   },
   "files": [

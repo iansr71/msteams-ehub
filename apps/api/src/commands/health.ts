@@ -19,9 +19,14 @@ export const API_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
   },
   { feature: 'retrieval', requirement: 'optional' },
   {
-    feature: 'azureOpenAI',
+    feature: 'embeddings',
     requirement: 'optional',
-    missingNote: 'Not required until answer generation is implemented (phase 9).',
+    missingNote: 'Without it, retrieval is keyword-only.',
+  },
+  {
+    feature: 'chat',
+    requirement: 'optional',
+    missingNote: 'Needed for answer generation (the ask command).',
   },
   {
     feature: 'azureIdentity',

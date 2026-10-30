@@ -107,3 +107,18 @@ always regenerates. The index also records model, version, dimensions and time p
 (schema version 2) for phase 11's change detection. Chunks are embedded with their resource and
 heading path prepended, because short chunks otherwise lose the context that makes them
 findable.
+
+## Answers are refused rather than repaired by the support checker (phase 9)
+
+When the model's answer contains a claim with no cited source, the whole answer is replaced by
+the insufficient-evidence message instead of dropping that claim: the remaining claims may only
+make sense with the unsupported one. Links the passages do not contain are removed rather than
+refusing the answer, because a link is not a claim. Invented source IDs make the output invalid
+(one repair, then a safe failure), since they mean the model cited something it was not given.
+
+## The embedding deployment variable switches query embeddings on (phase 9)
+
+`AZURE_OPENAI_ENDPOINT` and the API key are shared by the chat and embedding deployments, so
+their presence does not mean embeddings are configured. Retrieval uses query embeddings when
+`AZURE_OPENAI_EMBEDDING_DEPLOYMENT` is set; `pnpm api ask` requires them because answers always
+use hybrid retrieval.

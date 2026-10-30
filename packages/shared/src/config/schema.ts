@@ -208,6 +208,54 @@ export const embeddingConfigShape = {
   EMBEDDING_CACHE_DIR: z.string().trim().min(1).max(500).optional(),
 };
 
+export const CHAT_DEFAULTS = {
+  maxOutputTokens: 1_200,
+  requestTimeoutMs: 60_000,
+  maxRetries: 2,
+  responseFormat: 'json_schema',
+  maxQuestionChars: 1_000,
+  maxContextTokens: 12_000,
+  maxAnswerChars: 4_000,
+  minSupportingChunks: 1,
+} as const;
+
+export const CHAT_RESPONSE_FORMATS = ['json_schema', 'json_object'] as const;
+
+/*
+ * Grounded answer generation through an Azure OpenAI chat deployment (phase 9).
+ */
+export const chatConfigShape = {
+  AZURE_OPENAI_ENDPOINT: serviceUrl({ httpsOnly: true }),
+  AZURE_OPENAI_CHAT_DEPLOYMENT: azureDeploymentName,
+  AZURE_OPENAI_API_KEY: secretString(20).optional(),
+  AZURE_OPENAI_TOKEN_SCOPE: z
+    .url({ protocol: /^https$/, message: 'Must be an https scope URI.' })
+    .default(EMBEDDING_DEFAULTS.tokenScope),
+  /** Omit for models that reject it (reasoning models); 0-2 otherwise. */
+  CHAT_TEMPERATURE: z.coerce
+    .number({ message: 'Must be a number.' })
+    .min(0, { message: 'Must be between 0 and 2.' })
+    .max(2, { message: 'Must be between 0 and 2.' })
+    .optional(),
+  CHAT_MAX_OUTPUT_TOKENS: boundedInteger(100, 16_000, CHAT_DEFAULTS.maxOutputTokens),
+  CHAT_REQUEST_TIMEOUT_MS: boundedInteger(1_000, 300_000, CHAT_DEFAULTS.requestTimeoutMs),
+  CHAT_MAX_RETRIES: boundedInteger(0, 5, CHAT_DEFAULTS.maxRetries),
+  /** json_schema (structured outputs) where the model supports it; json_object otherwise. */
+  CHAT_RESPONSE_FORMAT: z.enum(CHAT_RESPONSE_FORMATS).default(CHAT_DEFAULTS.responseFormat),
+  RAG_MAX_QUESTION_CHARS: boundedInteger(10, 1_000, CHAT_DEFAULTS.maxQuestionChars),
+  /** Estimated tokens of source passages placed in the prompt. */
+  RAG_MAX_CONTEXT_TOKENS: boundedInteger(500, 100_000, CHAT_DEFAULTS.maxContextTokens),
+  RAG_MAX_ANSWER_CHARS: boundedInteger(200, 20_000, CHAT_DEFAULTS.maxAnswerChars),
+  /** Fewer retrieved chunks than this and no answer is attempted. */
+  RAG_MIN_SUPPORTING_CHUNKS: boundedInteger(1, 20, CHAT_DEFAULTS.minSupportingChunks),
+  /** Optional: the best chunk's semantic reranker score (0-4) must reach this. */
+  RAG_MIN_TOP_RERANKER_SCORE: z.coerce
+    .number({ message: 'Must be a number.' })
+    .min(0, { message: 'Must be between 0 and 4.' })
+    .max(4, { message: 'Must be between 0 and 4.' })
+    .optional(),
+};
+
 export const azureIdentityConfigShape = {
   AZURE_TENANT_ID: guid('AZURE_TENANT_ID'),
   AZURE_CLIENT_ID: guid('AZURE_CLIENT_ID'),
@@ -330,6 +378,7 @@ export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).supe
 );
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
 export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
+export const chatConfigSchema = defineConfigSchema(chatConfigShape);
 export const retrievalConfigSchema = defineConfigSchema(retrievalConfigShape).superRefine(
   (config, ctx) => {
     if (config.RETRIEVAL_CANDIDATE_COUNT < config.RETRIEVAL_TOP_K) {
@@ -374,6 +423,7 @@ export const applicationConfigSchema = defineConfigSchema({
   ...azureIdentityConfigShape,
   ...retrievalConfigShape,
   ...embeddingConfigShape,
+  ...chatConfigShape,
   ...observabilityConfigShape,
 });
 
@@ -385,6 +435,7 @@ export type AzureIdentityConfig = z.output<typeof azureIdentityConfigSchema>;
 export type ExtractionConfig = z.output<typeof extractionConfigSchema>;
 export type RetrievalConfig = z.output<typeof retrievalConfigSchema>;
 export type EmbeddingConfig = z.output<typeof embeddingConfigSchema>;
+export type ChatConfig = z.output<typeof chatConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -400,6 +451,7 @@ export const CONFIG_FEATURES = {
   chunking: chunkingConfigSchema,
   retrieval: retrievalConfigSchema,
   embeddings: embeddingConfigSchema,
+  chat: chatConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -416,5 +468,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   chunking: Object.keys(chunkingConfigShape),
   retrieval: Object.keys(retrievalConfigShape),
   embeddings: Object.keys(embeddingConfigShape),
+  chat: Object.keys(chatConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };
