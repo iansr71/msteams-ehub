@@ -8,11 +8,14 @@ import { createHealthCommand } from './health.js';
 import { createMoodleCommands } from './moodleCommands.js';
 import type { MoodleCommandDependencies } from './moodleServices.js';
 import { createSearchCommands, type SearchCommandDependencies } from './searchCommands.js';
+import { createSyncCommands } from './syncCommands.js';
+import type { SyncCommandDependencies } from './syncServices.js';
 
 export interface IndexerCommandDependencies {
   readonly moodle?: MoodleCommandDependencies;
   readonly search?: SearchCommandDependencies;
   readonly embeddings?: EmbeddingCommandDependencies;
+  readonly sync?: SyncCommandDependencies;
 }
 
 export function createIndexerCommands(
@@ -27,5 +30,6 @@ export function createIndexerCommands(
     'chunk:test': createChunkTestCommand(moodle, dependencies.embeddings ?? { env }),
     ...createSearchCommands(dependencies.search ?? { env }),
     ...createEmbeddingCommands(dependencies.embeddings ?? { env }),
+    ...createSyncCommands(dependencies.sync ?? { env }),
   };
 }

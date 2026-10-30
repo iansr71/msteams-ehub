@@ -131,3 +131,30 @@ refused. When anything was removed, the shown text is rebuilt from the surviving
 than the model's prose, because the prose may still state the removed content. Claim checks are
 mechanical (references, numbers, shared words): they catch fabricated pages, links, documents and
 figures, not subtle paraphrase errors, which the evaluation set and live testing must cover.
+
+## Synchronisation state behind a repository interface (phase 11)
+
+Jobs read and write state only through `SyncStateRepository`. Conditional writes (revision) and
+leases are part of the interface, because they are what make jobs safe to overlap, and they map
+directly onto SQL row versions and Azure Table ETags. The local implementation is JSON files with
+lock files; a production store is chosen in phase 19 and must pass the same contract tests.
+
+## Hidden Moodle content is excluded by default (phase 11)
+
+Hidden courses, sections, activities and Book chapters are not indexed unless
+`SYNC_INCLUDE_HIDDEN=true`, and are removed when they become hidden. Hidden content is usually a
+draft or retired material, and until enrolment checks (phase 14) anything indexed is answerable
+to everyone authorised for the course.
+
+## Deletions are guarded and selected courses are never auto-removed (phase 11)
+
+A Moodle glitch or a permission change on the service account can make a course look empty or
+missing. Removing more than half of a course's indexed resources (above a small minimum) needs
+`--allow-mass-delete`, and a selected course Moodle does not return is reported, not removed.
+The cost: genuinely deleted content in a still-selected course stays until an operator acts.
+
+## Chunks are kept on transient failures, removed on permanent failures of new files (phase 11)
+
+An outage must not make content unanswerable, so a transient failure keeps the indexed version.
+A permanent failure on a changed file removes the old chunks, because they describe a file
+Moodle no longer serves and would otherwise answer from an outdated version indefinitely.

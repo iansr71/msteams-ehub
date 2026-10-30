@@ -194,6 +194,10 @@ The default index name in code stays at the version in production until step 4.
 - `deleteChunksByResource` and `deleteChunksByCourse` list keys with keyset paging
   (`id gt '<last>'`, ordered by `id`) and delete them in batches. Both require a tenant ID and a
   course ID, so a deletion can never be unscoped.
+- `listChunkKeys` (phase 11) returns the key, course ID and resource ID of every chunk in a
+  tenant, course or resource, with the same paging and no content. `deleteChunksByKeys` deletes
+  exact keys (64-hex only; anything else is refused before a request). Synchronisation uses them
+  to remove leftover chunks after a replacement and chunks with no state.
 
 ## Tests
 

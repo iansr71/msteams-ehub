@@ -35,7 +35,13 @@ import {
   buildIndexDefinition,
   type SearchIndexDefinition,
 } from './indexDefinition.js';
-import { buildScopeFilter, odataString, type DocumentScope } from './odata.js';
+import {
+  buildListScopeFilter,
+  buildScopeFilter,
+  odataString,
+  type ChunkListScope,
+  type DocumentScope,
+} from './odata.js';
 import { buildSearchRequest, type SearchQuery, type SearchRequestPlan } from './query.js';
 import {
   buildInPlaceUpdate,
@@ -115,6 +121,13 @@ export interface DeletionReport extends IndexingReport {
   readonly matched: number;
 }
 
+/** Where an indexed chunk belongs; listing returns no content. */
+export interface IndexedChunkKey {
+  readonly id: string;
+  readonly courseId: number;
+  readonly resourceId: string;
+}
+
 export interface SearchHit {
   readonly document: RetrievedDocument;
   readonly score: number;
@@ -177,6 +190,9 @@ export interface SearchIndexClient {
     scope: Omit<DocumentScope, 'resourceId'>,
     options?: SearchCallOptions,
   ): Promise<DeletionReport>;
+  /** Keys of every chunk in a tenant, course or resource, ordered by key. */
+  listChunkKeys(scope: ChunkListScope, options?: SearchCallOptions): Promise<IndexedChunkKey[]>;
+  deleteChunksByKeys(keys: readonly string[], options?: SearchCallOptions): Promise<IndexingReport>;
   search(query: SearchQuery, options?: SearchCallOptions): Promise<SearchResults>;
   healthCheck(options?: SearchCallOptions): Promise<SearchHealthReport>;
 }
@@ -230,7 +246,10 @@ const searchResponseSchema = z.object({
   '@search.semanticPartialResponseReason': z.string().nullish(),
 });
 
-const keyPageSchema = z.object({ value: z.array(z.object({ id: z.string() })) });
+const keyPageSchema = z.object({
+  value: z.array(z.object({ id: z.string(), courseId: z.number().int(), resourceId: z.string() })),
+});
+const KEY_PATTERN = /^[0-9a-f]{64}$/;
 
 const indexStatsSchema = z.looseObject({
   documentCount: z.number(),
@@ -267,6 +286,11 @@ interface PreparedAction {
   readonly key: string;
   readonly json: string;
   readonly bytes: number;
+}
+
+function deleteAction(key: string): PreparedAction {
+  const json = JSON.stringify({ '@search.action': 'delete', id: key });
+  return { key, json, bytes: Buffer.byteLength(json) };
 }
 
 const silentLogger = createLogger({ service: 'search-client', level: 'silent' });
@@ -499,6 +523,29 @@ export class RestSearchIndexClient implements SearchIndexClient {
     return this.#deleteByScope({ tenantId: scope.tenantId, courseId: scope.courseId }, options);
   }
 
+  async listChunkKeys(
+    scope: ChunkListScope,
+    options: SearchCallOptions = {},
+  ): Promise<IndexedChunkKey[]> {
+    return await this.#listKeys(buildListScopeFilter(scope), options.signal);
+  }
+
+  async deleteChunksByKeys(
+    keys: readonly string[],
+    options: SearchCallOptions = {},
+  ): Promise<IndexingReport> {
+    const unique = [...new Set(keys)];
+    for (const key of unique) {
+      if (!KEY_PATTERN.test(key)) {
+        throw new SearchServiceError('A chunk key is not a valid document key.', {
+          category: 'invalid_request',
+          operation: 'delete',
+        });
+      }
+    }
+    return await this.#indexDocuments('delete', unique.map(deleteAction), options);
+  }
+
   #prepareDocuments(
     action: IndexingAction,
     documents: readonly SearchDocument[],
@@ -729,9 +776,8 @@ export class RestSearchIndexClient implements SearchIndexClient {
     };
   }
 
-  async #listKeys(scope: DocumentScope, signal: AbortSignal | undefined): Promise<string[]> {
-    const filter = buildScopeFilter(scope);
-    const keys: string[] = [];
+  async #listKeys(filter: string, signal: AbortSignal | undefined): Promise<IndexedChunkKey[]> {
+    const keys: IndexedChunkKey[] = [];
     let after: string | undefined;
     for (;;) {
       // Keyset paging on the key field: $skip is capped at 100,000 and shifts as documents
@@ -739,7 +785,7 @@ export class RestSearchIndexClient implements SearchIndexClient {
       const body = {
         search: '*',
         filter: after === undefined ? filter : `${filter} and id gt ${odataString(after)}`,
-        select: 'id',
+        select: 'id,courseId,resourceId',
         orderby: 'id asc',
         top: KEY_PAGE_SIZE,
       };
@@ -753,7 +799,7 @@ export class RestSearchIndexClient implements SearchIndexClient {
         signal,
       });
       const page = parseJson(result.text, keyPageSchema, 'listKeys').value;
-      keys.push(...page.map((entry) => entry.id));
+      keys.push(...page);
       const last = page.at(-1);
       if (page.length < KEY_PAGE_SIZE || last === undefined) {
         return keys;
@@ -763,12 +809,12 @@ export class RestSearchIndexClient implements SearchIndexClient {
   }
 
   async #deleteByScope(scope: DocumentScope, options: SearchCallOptions): Promise<DeletionReport> {
-    const keys = await this.#listKeys(scope, options.signal);
-    const actions = keys.map((key) => {
-      const json = JSON.stringify({ '@search.action': 'delete', id: key });
-      return { key, json, bytes: Buffer.byteLength(json) };
-    });
-    const report = await this.#indexDocuments('delete', actions, options);
+    const keys = await this.#listKeys(buildScopeFilter(scope), options.signal);
+    const report = await this.#indexDocuments(
+      'delete',
+      keys.map((entry) => deleteAction(entry.id)),
+      options,
+    );
     return { ...report, matched: keys.length };
   }
 

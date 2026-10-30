@@ -116,6 +116,29 @@ export interface DocumentScope {
   readonly resourceId?: string;
 }
 
+/** A listing scope: a whole tenant, one course, or one resource. */
+export interface ChunkListScope {
+  readonly tenantId: string;
+  readonly courseId?: number;
+  /** Only with `courseId`. */
+  readonly resourceId?: string;
+}
+
+/** Selects every chunk of a tenant, course or resource (for listing, never for queries). */
+export function buildListScopeFilter(scope: ChunkListScope): string {
+  if (scope.courseId === undefined) {
+    if (scope.resourceId !== undefined) {
+      throw new InvalidFilterValueError('resource ID');
+    }
+    return `tenantId eq ${odataString(assertIdentifier(scope.tenantId, 'tenant ID'))}`;
+  }
+  return buildScopeFilter({
+    tenantId: scope.tenantId,
+    courseId: scope.courseId,
+    ...(scope.resourceId === undefined ? {} : { resourceId: scope.resourceId }),
+  });
+}
+
 /** Selects every chunk of one course, or of one resource within it. */
 export function buildScopeFilter(scope: DocumentScope): string {
   const parts = [

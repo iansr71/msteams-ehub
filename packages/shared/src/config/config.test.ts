@@ -14,6 +14,7 @@ import {
   azureSearchConfigSchema,
   moodleConfigSchema,
   runtimeConfigSchema,
+  syncConfigSchema,
 } from './schema.js';
 
 // Obviously fake values; none of these is a real credential or endpoint.
@@ -318,6 +319,44 @@ describe('getConfigFeatureStatus', () => {
     );
     expect(loadConfig(azureIdentityConfigSchema, validEnv).AZURE_TENANT_ID).toBe(
       validEnv.AZURE_TENANT_ID,
+    );
+  });
+});
+
+describe('sync configuration', () => {
+  const tenant = { AZURE_TENANT_ID: '00000000-0000-4000-8000-000000000001' };
+
+  it('parses, de-duplicates and sorts SYNC_COURSE_IDS and applies defaults', () => {
+    const config = loadConfig(syncConfigSchema, { ...tenant, SYNC_COURSE_IDS: ' 15, 12,15 ,' });
+    expect(config).toMatchObject({
+      SYNC_COURSE_IDS: [12, 15],
+      SYNC_ALL_COURSES: false,
+      SYNC_INCLUDE_HIDDEN: false,
+      SYNC_STATE_DIR: '.ehub/sync-state',
+      SYNC_MAX_ATTEMPTS: 5,
+      SYNC_MAX_DELETE_FRACTION: 0.5,
+    });
+    // Empty values (copied from .env.example) mean unset.
+    expect(
+      loadConfig(syncConfigSchema, { ...tenant, SYNC_COURSE_IDS: '' }).SYNC_COURSE_IDS,
+    ).toBeUndefined();
+  });
+
+  it('rejects malformed or conflicting selections and settings', () => {
+    for (const env of [
+      { SYNC_COURSE_IDS: '12,abc' },
+      { SYNC_COURSE_IDS: '0' },
+      { SYNC_COURSE_IDS: '12', SYNC_ALL_COURSES: 'true' },
+      { SYNC_MAX_DELETE_FRACTION: '1.5' },
+      { SYNC_RETRY_BASE_DELAY_MS: '5000', SYNC_RETRY_MAX_DELAY_MS: '1000' },
+      { SYNC_LEASE_TTL_MS: '1000' },
+    ]) {
+      expect(() => loadConfig(syncConfigSchema, { ...tenant, ...env })).toThrow(
+        ConfigValidationError,
+      );
+    }
+    expect(() => loadConfig(syncConfigSchema, { SYNC_ALL_COURSES: 'true' })).toThrow(
+      ConfigValidationError,
     );
   });
 });

@@ -20,12 +20,17 @@ export const INDEXER_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
   {
     feature: 'azureSearch',
     requirement: 'optional',
-    missingNote: 'Needed for the search:* commands and, from phase 11, indexing.',
+    missingNote: 'Needed for the search:* and sync:* commands.',
   },
   {
     feature: 'embeddings',
     requirement: 'optional',
-    missingNote: 'Needed for the embeddings:* commands and, from phase 11, indexing.',
+    missingNote: 'Needed for the embeddings:* and sync:* commands.',
+  },
+  {
+    feature: 'sync',
+    requirement: 'optional',
+    missingNote: 'Needed for the sync:* commands (AZURE_TENANT_ID and a course selection).',
   },
   { feature: 'extraction', requirement: 'optional' },
   { feature: 'chunking', requirement: 'optional' },

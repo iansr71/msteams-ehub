@@ -367,6 +367,71 @@ export const retrievalConfigShape = {
   RETRIEVAL_MIN_RERANKER_SCORE: optionalDecimal(0, 4),
 };
 
+export const SYNC_DEFAULTS = {
+  stateDir: '.ehub/sync-state',
+  maxAttempts: 5,
+  retryBaseDelayMs: 10 * 60_000,
+  retryMaxDelayMs: 24 * 60 * 60_000,
+  leaseTtlMs: 30 * 60_000,
+  maxDeleteFraction: 0.5,
+  maxDeleteMinimum: 5,
+} as const;
+
+const syncCourseIdList = z
+  .string()
+  .trim()
+  .transform((value) =>
+    value === ''
+      ? []
+      : value
+          .split(',')
+          .map((part) => part.trim())
+          .filter((part) => part !== ''),
+  )
+  .pipe(
+    z
+      .array(
+        z
+          .string()
+          .regex(/^[1-9]\d{0,9}$/, { message: 'Must be positive whole numbers.' })
+          .transform(Number),
+      )
+      .max(500, { message: 'At most 500 course IDs.' }),
+  )
+  .transform((ids) => [...new Set(ids)].sort((a, b) => a - b));
+
+/*
+ * Moodle synchronisation (phase 11). Which courses are indexed is an explicit choice:
+ * SYNC_COURSE_IDS, or SYNC_ALL_COURSES=true for every course the service account can see.
+ */
+export const syncConfigShape = {
+  /** Stamped on every chunk and part of every state key. */
+  AZURE_TENANT_ID: guid('AZURE_TENANT_ID'),
+  SYNC_COURSE_IDS: syncCourseIdList.optional(),
+  SYNC_ALL_COURSES: booleanFlag(false),
+  /** Index content hidden from students (hidden courses, sections, activities, chapters). */
+  SYNC_INCLUDE_HIDDEN: booleanFlag(false),
+  /** Local state store directory (development). */
+  SYNC_STATE_DIR: z.string().trim().min(1).max(500).default(SYNC_DEFAULTS.stateDir),
+  /** Attempts for a transient failure before the resource is dead-lettered. */
+  SYNC_MAX_ATTEMPTS: boundedInteger(1, 20, SYNC_DEFAULTS.maxAttempts),
+  SYNC_RETRY_BASE_DELAY_MS: boundedInteger(0, 86_400_000, SYNC_DEFAULTS.retryBaseDelayMs),
+  SYNC_RETRY_MAX_DELAY_MS: boundedInteger(0, 7 * 86_400_000, SYNC_DEFAULTS.retryMaxDelayMs),
+  /** How long a course lock lasts without renewal; renewed after every resource. */
+  SYNC_LEASE_TTL_MS: boundedInteger(60_000, 6 * 3_600_000, SYNC_DEFAULTS.leaseTtlMs),
+  /**
+   * Deletion guard: refuse to remove more than this fraction of a course's indexed resources
+   * (or of the indexed courses) as "missing from Moodle" in one run, once more than
+   * SYNC_MAX_DELETE_MINIMUM would go. Protects against a Moodle glitch returning empty lists.
+   */
+  SYNC_MAX_DELETE_FRACTION: z.coerce
+    .number({ message: 'Must be a number.' })
+    .min(0, { message: 'Must be between 0 and 1.' })
+    .max(1, { message: 'Must be between 0 and 1.' })
+    .default(SYNC_DEFAULTS.maxDeleteFraction),
+  SYNC_MAX_DELETE_MINIMUM: boundedInteger(0, 100_000, SYNC_DEFAULTS.maxDeleteMinimum),
+};
+
 export const observabilityConfigShape = {
   APPLICATIONINSIGHTS_CONNECTION_STRING: z
     .string()
@@ -411,6 +476,22 @@ export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).supe
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
 export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
 export const chatConfigSchema = defineConfigSchema(chatConfigShape);
+export const syncConfigSchema = defineConfigSchema(syncConfigShape).superRefine((config, ctx) => {
+  if (config.SYNC_ALL_COURSES && (config.SYNC_COURSE_IDS?.length ?? 0) > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SYNC_COURSE_IDS'],
+      message: 'Set SYNC_COURSE_IDS or SYNC_ALL_COURSES=true, not both.',
+    });
+  }
+  if (config.SYNC_RETRY_BASE_DELAY_MS > config.SYNC_RETRY_MAX_DELAY_MS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SYNC_RETRY_BASE_DELAY_MS'],
+      message: 'Must not exceed SYNC_RETRY_MAX_DELAY_MS.',
+    });
+  }
+});
 export const retrievalConfigSchema = defineConfigSchema(retrievalConfigShape).superRefine(
   (config, ctx) => {
     if (config.RETRIEVAL_CANDIDATE_COUNT < config.RETRIEVAL_TOP_K) {
@@ -456,6 +537,7 @@ export const applicationConfigSchema = defineConfigSchema({
   ...retrievalConfigShape,
   ...embeddingConfigShape,
   ...chatConfigShape,
+  ...syncConfigShape,
   ...observabilityConfigShape,
 });
 
@@ -468,6 +550,7 @@ export type ExtractionConfig = z.output<typeof extractionConfigSchema>;
 export type RetrievalConfig = z.output<typeof retrievalConfigSchema>;
 export type EmbeddingConfig = z.output<typeof embeddingConfigSchema>;
 export type ChatConfig = z.output<typeof chatConfigSchema>;
+export type SyncConfig = z.output<typeof syncConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -484,6 +567,7 @@ export const CONFIG_FEATURES = {
   retrieval: retrievalConfigSchema,
   embeddings: embeddingConfigSchema,
   chat: chatConfigSchema,
+  sync: syncConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -501,5 +585,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   retrieval: Object.keys(retrievalConfigShape),
   embeddings: Object.keys(embeddingConfigShape),
   chat: Object.keys(chatConfigShape),
+  sync: Object.keys(syncConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

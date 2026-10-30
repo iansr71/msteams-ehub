@@ -108,6 +108,14 @@ export class ExtractorRegistry {
     this.#clock = options.clock;
   }
 
+  /** Name and version of every registered extractor, in registration order. */
+  extractorVersions(): readonly ExtractorIdentity[] {
+    return this.#extractors.map((extractor) => ({
+      name: extractor.name,
+      version: extractor.version,
+    }));
+  }
+
   async extract(resource: ExtractionResource, input: ExtractionInput): Promise<ExtractionResult> {
     let detected: DetectedContentType = 'empty';
     let extractor: ContentExtractor | undefined;

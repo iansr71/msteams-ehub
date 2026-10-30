@@ -312,7 +312,7 @@ describe('RestSearchIndexClient documents', () => {
     expect(listing).toHaveLength(2);
     expect(JSON.parse(listing[1]?.body ?? '{}')).toMatchObject({
       orderby: 'id asc',
-      select: 'id',
+      select: 'id,courseId,resourceId',
       filter: expect.stringContaining(' and id gt ') as unknown,
     });
   });
@@ -332,6 +332,45 @@ describe('RestSearchIndexClient documents', () => {
     await expect(
       client.deleteChunksByCourse({ tenantId: "x' or '1", courseId: 12 }),
     ).rejects.toThrow(/Invalid tenant ID/);
+  });
+
+  it('lists chunk keys for a tenant, course or resource without content', async () => {
+    const { service, client } = setup();
+    await client.createOrUpdateIndex();
+    const docs = [
+      makeSearchDocument({ seed: 'a' }),
+      makeSearchDocument({ seed: 'b', resourceId: '701:page' }),
+      makeSearchDocument({ seed: 'c', courseId: 13 }),
+      makeSearchDocument({ seed: 'd', tenantId: 'tenant-2' }),
+    ];
+    service.seed(INDEX, docs);
+    const tenant = await client.listChunkKeys({ tenantId: 'tenant-1' });
+    expect(tenant.map((entry) => entry.courseId).sort()).toEqual([12, 12, 13]);
+    expect(Object.keys(tenant[0] ?? {}).sort()).toEqual(['courseId', 'id', 'resourceId']);
+    expect(
+      await client.listChunkKeys({ tenantId: 'tenant-1', courseId: 12, resourceId: '701:page' }),
+    ).toEqual([{ id: docs[1]?.id, courseId: 12, resourceId: '701:page' }]);
+    expect(await client.listChunkKeys({ tenantId: 'tenant-1', courseId: 13 })).toHaveLength(1);
+    const listing = JSON.parse(service.requests.at(-1)?.body ?? '{}') as { filter: string };
+    expect(listing.filter).toBe("tenantId eq 'tenant-1' and courseId eq 13");
+    await expect(
+      client.listChunkKeys({ tenantId: 'tenant-1', resourceId: '701:page' }),
+    ).rejects.toThrow();
+  });
+
+  it('deletes chunks by key, rejecting anything that is not a document key', async () => {
+    const { service, client } = setup();
+    await client.createOrUpdateIndex();
+    const docs = [makeSearchDocument({ seed: 'a' }), makeSearchDocument({ seed: 'b' })];
+    service.seed(INDEX, docs);
+    const first = docs[0]?.id ?? '';
+    const report = await client.deleteChunksByKeys([first, first]);
+    expect(report).toMatchObject({ action: 'delete', attempted: 1, succeeded: 1, failed: [] });
+    expect([...(service.documents.get(INDEX)?.keys() ?? [])]).toEqual([docs[1]?.id]);
+    await expect(client.deleteChunksByKeys(["x' or 1"])).rejects.toThrow(
+      /not a valid document key/,
+    );
+    expect((await client.deleteChunksByKeys([])).attempted).toBe(0);
   });
 });
 
