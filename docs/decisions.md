@@ -158,3 +158,32 @@ The cost: genuinely deleted content in a still-selected course stays until an op
 An outage must not make content unanswerable, so a transient failure keeps the indexed version.
 A permanent failure on a changed file removes the old chunks, because they describe a file
 Moodle no longer serves and would otherwise answer from an outdated version indefinitely.
+
+## An HTTP answer API between Teams and the answer engine (phase 12)
+
+Prompt 12 says the Teams app calls "the existing RAG API", but until now the engine was only
+reachable through the CLI. Phase 12 adds `pnpm api serve` rather than embedding the engine in
+the bot: the bot then needs no Moodle, Search or OpenAI credentials, the API is the single place
+that will verify user tokens (phase 13) and enforce course access (phase 14), and the two can be
+scaled and secured separately. The request/response contract lives in `@ehub/shared/answers`.
+
+## Microsoft Teams SDK behind an adapter (phase 12)
+
+The bot uses `@microsoft/teams.apps` (Microsoft Teams SDK v2), which Microsoft lists as the main
+toolkit for Teams agents. Only `src/teams/` imports it; the conversation, API client and card
+renderers are SDK-free. The SDK's own logger is replaced by one that keeps only message strings,
+because the SDK logs whole activities (including the user's question) at debug level. The SDK's
+express transport is replaced by a small node:http adapter that also serves `/health`.
+
+## Answer in the background, acknowledge at once (phase 12)
+
+Teams redelivers an activity whose HTTP response takes more than 15 seconds, and a grounded
+answer can take longer. The bot replies to Teams immediately, shows "typing", answers in the
+background and ignores redelivered activity IDs.
+
+## Development mock identity, refused everywhere else (phase 12)
+
+Teams message fields are not proof of identity for the API. Until SSO, both services accept an
+explicit mock user only with `NODE_ENV=development`, the API decides that user's courses, every
+card carries a "mock identity" banner, and both services (and production packaging) refuse to
+run in production.

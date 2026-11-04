@@ -29,6 +29,11 @@ export const API_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
     missingNote: 'Needed for answer generation (the ask command).',
   },
   {
+    feature: 'apiServer',
+    requirement: 'optional',
+    missingNote: 'Settings for `serve`, the HTTP answer API used by the Teams app.',
+  },
+  {
     feature: 'azureIdentity',
     requirement: 'optional',
     missingNote: 'Not required until Entra ID SSO is implemented (phase 13).',

@@ -24,6 +24,11 @@
       "@ehub/source": "./src/http/retry.ts",
       "types": "./dist/http/retry.d.ts",
       "default": "./dist/http/retry.js"
+    },
+    "./answers": {
+      "@ehub/source": "./src/answers/index.ts",
+      "types": "./dist/answers/index.d.ts",
+      "default": "./dist/answers/index.js"
     }
   },
   "files": [

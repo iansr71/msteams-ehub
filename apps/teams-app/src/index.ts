@@ -1,3 +1,9 @@
-// The Teams personal app (manifest, message handler, Adaptive Cards) is implemented in phase 12.
-// This package exists now so the workspace layout and build graph are stable.
-export const TEAMS_APP_PACKAGE = '@ehub/teams-app';
+export * from './api/answerClient.js';
+export * from './cards/actions.js';
+export * from './cards/adaptiveCard.js';
+export * from './cards/answerCard.js';
+export * from './cards/sourceCard.js';
+export * from './cards/statusCards.js';
+export * from './cards/text.js';
+export * from './conversation/conversationHandler.js';
+export * from './conversation/identity.js';

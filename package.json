@@ -22,7 +22,10 @@
     "test:security": "vitest run --project security",
     "api": "pnpm --silent --filter @ehub/api run cli",
     "indexer": "pnpm --silent --filter @ehub/indexer run cli",
-    "evaluation": "pnpm --silent --filter @ehub/api run evaluation"
+    "evaluation": "pnpm --silent --filter @ehub/api run evaluation",
+    "teams:validate": "pnpm --silent --filter @ehub/teams-app run manifest validate",
+    "teams:package": "pnpm --silent --filter @ehub/teams-app run manifest package",
+    "teams:dev": "pnpm --silent --filter @ehub/teams-app run dev"
   },
   "devDependencies": {
     "@ehub/moodle-client": "workspace:*",

@@ -11,6 +11,7 @@ export const SECRET_ENV_KEYS = [
   'AZURE_SEARCH_API_KEY',
   'AZURE_OPENAI_API_KEY',
   'AZURE_CLIENT_SECRET',
+  'TEAMS_BOT_CLIENT_SECRET',
   'APPLICATIONINSIGHTS_CONNECTION_STRING',
 ] as const;
 
@@ -432,6 +433,97 @@ export const syncConfigShape = {
   SYNC_MAX_DELETE_MINIMUM: boundedInteger(0, 100_000, SYNC_DEFAULTS.maxDeleteMinimum),
 };
 
+const hostList = z
+  .string()
+  .trim()
+  .transform((value) =>
+    value
+      .split(',')
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => part !== ''),
+  )
+  .pipe(
+    z
+      .array(
+        z
+          .string()
+          .regex(
+            /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
+            {
+              message: 'Must be host names, e.g. ehub.example.com.',
+            },
+          ),
+      )
+      .max(20),
+  );
+
+const mockUserId = z
+  .string()
+  .trim()
+  .regex(/^dev-mock-[a-z0-9-]{1,40}$/, {
+    message: 'Must start with "dev-mock-" so it can never be mistaken for a real user.',
+  });
+
+export const API_SERVER_DEFAULTS = {
+  host: '127.0.0.1',
+  requestTimeoutMs: 90_000,
+  mockUserId: 'dev-mock-user',
+} as const;
+
+/*
+ * The answer API's HTTP server (phase 12). Until Entra ID SSO (phase 13) the only caller
+ * identity is the development mock identity, which is refused outside NODE_ENV=development.
+ */
+export const apiServerConfigShape = {
+  /** Interface to listen on; loopback by default. */
+  API_HOST: z.string().trim().min(1).max(255).default(API_SERVER_DEFAULTS.host),
+  API_REQUEST_TIMEOUT_MS: boundedInteger(5_000, 300_000, API_SERVER_DEFAULTS.requestTimeoutMs),
+  API_DEV_MOCK_IDENTITY: booleanFlag(false),
+  API_DEV_MOCK_USER_ID: mockUserId.default(API_SERVER_DEFAULTS.mockUserId),
+  /** The mock user's "authorised" courses (until phase 14 reads Moodle enrolments). */
+  API_DEV_MOCK_COURSE_IDS: syncCourseIdList.optional(),
+};
+
+export const TEAMS_DEFAULTS = {
+  botPort: 3978,
+  apiBaseUrl: 'http://127.0.0.1:3000',
+  apiTimeoutMs: 60_000,
+  maxConcurrentQuestions: 8,
+  cardMaxBytes: 24_000,
+} as const;
+
+/* The Teams bot (phase 12). Teams code never holds Moodle or Azure service credentials. */
+export const teamsConfigShape = {
+  TEAMS_BOT_PORT: boundedInteger(1, 65_535, TEAMS_DEFAULTS.botPort),
+  /** The bot's Microsoft Entra app registration (client) ID; also the manifest's botId. */
+  TEAMS_BOT_CLIENT_ID: guid('TEAMS_BOT_CLIENT_ID').optional(),
+  /** Local development only; Azure uses Managed Identity. */
+  TEAMS_BOT_CLIENT_SECRET: secretString(8).optional(),
+  TEAMS_BOT_TENANT_ID: guid('TEAMS_BOT_TENANT_ID').optional(),
+  /** The answer API (apps/api `serve`); http://127.0.0.1:3000 in development when unset. */
+  TEAMS_API_BASE_URL: serviceUrl({ httpsOnly: false }).optional(),
+  TEAMS_API_TIMEOUT_MS: boundedInteger(1_000, 120_000, TEAMS_DEFAULTS.apiTimeoutMs),
+  TEAMS_DEV_MOCK_IDENTITY: booleanFlag(false),
+  TEAMS_DEV_MOCK_USER_ID: mockUserId.default(API_SERVER_DEFAULTS.mockUserId),
+  /** Local tools such as Microsoft 365 Agents Playground send unsigned requests. */
+  TEAMS_DEV_ALLOW_UNAUTHENTICATED: booleanFlag(false),
+  /** When set, "Open in E-Hub" links are shown only for these hosts. */
+  TEAMS_ALLOWED_LINK_HOSTS: hostList.optional(),
+  TEAMS_MAX_CONCURRENT_QUESTIONS: boundedInteger(1, 100, TEAMS_DEFAULTS.maxConcurrentQuestions),
+  /** Serialised card budget; Teams rejects larger messages (see docs/teams-app.md). */
+  TEAMS_CARD_MAX_BYTES: boundedInteger(8_000, 28_000, TEAMS_DEFAULTS.cardMaxBytes),
+};
+
+/* Values substituted into the Teams app manifest by teams:validate / teams:package. */
+export const teamsManifestConfigShape = {
+  TEAMS_APP_ID: guid('TEAMS_APP_ID'),
+  TEAMS_BOT_CLIENT_ID: guid('TEAMS_BOT_CLIENT_ID'),
+  TEAMS_DEVELOPER_NAME: z.string().trim().min(1).max(32),
+  TEAMS_WEBSITE_URL: z.url({ protocol: /^https$/, message: 'Must be an https URL.' }),
+  TEAMS_PRIVACY_URL: z.url({ protocol: /^https$/, message: 'Must be an https URL.' }),
+  TEAMS_TERMS_URL: z.url({ protocol: /^https$/, message: 'Must be an https URL.' }),
+};
+
 export const observabilityConfigShape = {
   APPLICATIONINSIGHTS_CONNECTION_STRING: z
     .string()
@@ -474,6 +566,46 @@ export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).supe
   },
 );
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
+export const apiServerConfigSchema = defineConfigSchema(apiServerConfigShape).superRefine(
+  (config, ctx) => {
+    if (!config.API_DEV_MOCK_IDENTITY) {
+      return;
+    }
+    if (config.NODE_ENV !== 'development') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['API_DEV_MOCK_IDENTITY'],
+        message: 'The mock identity is only allowed with NODE_ENV=development.',
+      });
+    }
+    if ((config.API_DEV_MOCK_COURSE_IDS?.length ?? 0) === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['API_DEV_MOCK_COURSE_IDS'],
+        message: 'Required with API_DEV_MOCK_IDENTITY=true.',
+      });
+    }
+  },
+);
+export const teamsConfigSchema = defineConfigSchema(teamsConfigShape).superRefine((config, ctx) => {
+  for (const key of ['TEAMS_DEV_MOCK_IDENTITY', 'TEAMS_DEV_ALLOW_UNAUTHENTICATED'] as const) {
+    if (config[key] && config.NODE_ENV !== 'development') {
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message: 'Only allowed with NODE_ENV=development.',
+      });
+    }
+  }
+  if (config.TEAMS_BOT_CLIENT_SECRET !== undefined && config.TEAMS_BOT_CLIENT_ID === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TEAMS_BOT_CLIENT_ID'],
+      message: 'Required with TEAMS_BOT_CLIENT_SECRET.',
+    });
+  }
+});
+export const teamsManifestConfigSchema = defineConfigSchema(teamsManifestConfigShape);
 export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
 export const chatConfigSchema = defineConfigSchema(chatConfigShape);
 export const syncConfigSchema = defineConfigSchema(syncConfigShape).superRefine((config, ctx) => {
@@ -538,6 +670,14 @@ export const applicationConfigSchema = defineConfigSchema({
   ...embeddingConfigShape,
   ...chatConfigShape,
   ...syncConfigShape,
+  ...apiServerConfigShape,
+  // Manifest values are build-time inputs (teams:package), optional for the running services.
+  TEAMS_APP_ID: teamsManifestConfigShape.TEAMS_APP_ID.optional(),
+  TEAMS_DEVELOPER_NAME: teamsManifestConfigShape.TEAMS_DEVELOPER_NAME.optional(),
+  TEAMS_WEBSITE_URL: teamsManifestConfigShape.TEAMS_WEBSITE_URL.optional(),
+  TEAMS_PRIVACY_URL: teamsManifestConfigShape.TEAMS_PRIVACY_URL.optional(),
+  TEAMS_TERMS_URL: teamsManifestConfigShape.TEAMS_TERMS_URL.optional(),
+  ...teamsConfigShape,
   ...observabilityConfigShape,
 });
 
@@ -551,6 +691,9 @@ export type RetrievalConfig = z.output<typeof retrievalConfigSchema>;
 export type EmbeddingConfig = z.output<typeof embeddingConfigSchema>;
 export type ChatConfig = z.output<typeof chatConfigSchema>;
 export type SyncConfig = z.output<typeof syncConfigSchema>;
+export type ApiServerConfig = z.output<typeof apiServerConfigSchema>;
+export type TeamsConfig = z.output<typeof teamsConfigSchema>;
+export type TeamsManifestConfig = z.output<typeof teamsManifestConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -568,6 +711,9 @@ export const CONFIG_FEATURES = {
   embeddings: embeddingConfigSchema,
   chat: chatConfigSchema,
   sync: syncConfigSchema,
+  apiServer: apiServerConfigSchema,
+  teams: teamsConfigSchema,
+  teamsManifest: teamsManifestConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -586,5 +732,8 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   embeddings: Object.keys(embeddingConfigShape),
   chat: Object.keys(chatConfigShape),
   sync: Object.keys(syncConfigShape),
+  apiServer: Object.keys(apiServerConfigShape),
+  teams: Object.keys(teamsConfigShape),
+  teamsManifest: Object.keys(teamsManifestConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

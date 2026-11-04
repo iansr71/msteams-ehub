@@ -15,6 +15,8 @@ import {
   moodleConfigSchema,
   runtimeConfigSchema,
   syncConfigSchema,
+  apiServerConfigSchema,
+  teamsConfigSchema,
 } from './schema.js';
 
 // Obviously fake values; none of these is a real credential or endpoint.
@@ -357,6 +359,73 @@ describe('sync configuration', () => {
     }
     expect(() => loadConfig(syncConfigSchema, { SYNC_ALL_COURSES: 'true' })).toThrow(
       ConfigValidationError,
+    );
+  });
+});
+
+describe('API server and Teams configuration', () => {
+  it('allows the mock identity only in development, with courses and a dev-mock user', () => {
+    expect(
+      loadConfig(apiServerConfigSchema, {
+        NODE_ENV: 'development',
+        API_DEV_MOCK_IDENTITY: 'true',
+        API_DEV_MOCK_COURSE_IDS: '15,12',
+      }),
+    ).toMatchObject({
+      API_DEV_MOCK_COURSE_IDS: [12, 15],
+      API_DEV_MOCK_USER_ID: 'dev-mock-user',
+      API_HOST: '127.0.0.1',
+    });
+    for (const env of [
+      { NODE_ENV: 'test', API_DEV_MOCK_IDENTITY: 'true', API_DEV_MOCK_COURSE_IDS: '12' },
+      { NODE_ENV: 'production', API_DEV_MOCK_IDENTITY: 'true', API_DEV_MOCK_COURSE_IDS: '12' },
+      { NODE_ENV: 'development', API_DEV_MOCK_IDENTITY: 'true' },
+      {
+        NODE_ENV: 'development',
+        API_DEV_MOCK_IDENTITY: 'true',
+        API_DEV_MOCK_COURSE_IDS: '12',
+        API_DEV_MOCK_USER_ID: 'admin',
+      },
+    ]) {
+      expect(() => loadConfig(apiServerConfigSchema, env)).toThrow(ConfigValidationError);
+    }
+  });
+
+  it('keeps Teams development switches out of other environments and the API URL https in production', () => {
+    expect(
+      loadConfig(teamsConfigSchema, {
+        NODE_ENV: 'development',
+        TEAMS_DEV_MOCK_IDENTITY: 'true',
+        TEAMS_ALLOWED_LINK_HOSTS: 'EHub.Example.com, ',
+      }),
+    ).toMatchObject({
+      TEAMS_DEV_MOCK_IDENTITY: true,
+      TEAMS_ALLOWED_LINK_HOSTS: ['ehub.example.com'],
+    });
+    for (const env of [
+      { NODE_ENV: 'test', TEAMS_DEV_ALLOW_UNAUTHENTICATED: 'true' },
+      {
+        NODE_ENV: 'production',
+        TEAMS_API_BASE_URL: 'https://api.example.com',
+        TEAMS_DEV_MOCK_IDENTITY: 'true',
+      },
+      { NODE_ENV: 'production', TEAMS_API_BASE_URL: 'http://api.example.com' },
+      { NODE_ENV: 'development', TEAMS_BOT_CLIENT_SECRET: 'some-secret-value' },
+      { NODE_ENV: 'development', TEAMS_CARD_MAX_BYTES: '40000' },
+      { NODE_ENV: 'development', TEAMS_ALLOWED_LINK_HOSTS: 'https://ehub.example.com/' },
+    ]) {
+      expect(() => loadConfig(teamsConfigSchema, env)).toThrow(ConfigValidationError);
+    }
+  });
+
+  it('treats the bot client secret as a secret', () => {
+    const config = loadConfig(teamsConfigSchema, {
+      NODE_ENV: 'development',
+      TEAMS_BOT_CLIENT_ID: '00000000-0000-4000-8000-0000000000b0',
+      TEAMS_BOT_CLIENT_SECRET: 'fake-bot-secret-value',
+    });
+    expect(describeConfig(config)['TEAMS_BOT_CLIENT_SECRET']).not.toContain(
+      'fake-bot-secret-value',
     );
   });
 });

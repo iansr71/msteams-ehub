@@ -1,0 +1,55 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.24/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.24",
+  "version": "${{APP_VERSION}}",
+  "id": "${{TEAMS_APP_ID}}",
+  "developer": {
+    "name": "${{TEAMS_DEVELOPER_NAME}}",
+    "websiteUrl": "${{TEAMS_WEBSITE_URL}}",
+    "privacyUrl": "${{TEAMS_PRIVACY_URL}}",
+    "termsOfUseUrl": "${{TEAMS_TERMS_URL}}"
+  },
+  "name": {
+    "short": "${{APP_SHORT_NAME}}",
+    "full": "${{APP_FULL_NAME}}"
+  },
+  "description": {
+    "short": "Answers from E-Hub training courses, with sources.",
+    "full": "Ask questions about procedures, treatments and training material. Answers come only from the E-Hub (Moodle) courses you can access, and every answer lists numbered sources you can open in E-Hub. If the courses do not contain the answer, the assistant says so instead of guessing."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "${{ACCENT_COLOR}}",
+  "bots": [
+    {
+      "botId": "${{TEAMS_BOT_CLIENT_ID}}",
+      "scopes": ["personal"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal"],
+          "commands": [
+            {
+              "title": "help",
+              "description": "What I can do, with example questions"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staticTabs": [
+    {
+      "entityId": "conversations",
+      "scopes": ["personal"]
+    },
+    {
+      "entityId": "about",
+      "scopes": ["personal"]
+    }
+  ],
+  "validDomains": []
+}

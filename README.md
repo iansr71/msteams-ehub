@@ -4,20 +4,21 @@ A Microsoft Teams personal app that answers staff questions from Moodle E-Hub co
 Answers are grounded in indexed Moodle resources, carry validated citations, and respect each
 user's Moodle course enrolments.
 
-> **Status: phase 11 (incremental Moodle synchronisation).** Moodle client and course
+> **Status: phase 12 (Teams personal app, development only).** Moodle client and course
 > discovery, secure extraction (PDF, Moodle Page and Book, HTML, plain text, DOCX, PPTX),
 > structure-aware chunking, the Azure AI Search index, embeddings, filtered retrieval, grounded
-> answers with validated citations, and incremental synchronisation of selected courses into the
-> index (`sync:*`, see docs/sync.md). Teams, Entra ID sign-in and enrolment-based authorisation
-> are delivered in later phases.
+> answers with validated citations, incremental synchronisation (`sync:*`, docs/sync.md), the
+> HTTP answer API (`pnpm api serve`) and the Teams personal app (docs/teams-app.md). Until Entra
+> ID sign-in (phase 13) the app runs only in development with a mock identity; production is
+> blocked. Enrolment-based authorisation follows in phase 14.
 
 ## Repository layout
 
 ```
 apps/
-  api/            Question-answering API (retrieval, RAG, auth) — health command today
+  api/            Retrieval, grounded answers, citations, and the HTTP answer API (`serve`)
   indexer/        Moodle discovery, extraction, chunking, embeddings and synchronisation (moodle:*, sync:*)
-  teams-app/      Teams personal app (phase 12)
+  teams-app/      Teams personal app: bot, Adaptive Cards, manifest and package tooling
 packages/
   shared/         Zod configuration, structured logger, redaction, correlation IDs, CLI/health helpers
   moodle-client/  Typed Moodle REST client and safe file downloader
@@ -99,7 +100,8 @@ pnpm -s api health
 ```
 
 The report lists each configuration group (`runtime`, `moodle`, `azureSearch`, `azureOpenAI`,
-`azureIdentity`, `retrieval`, `embeddings`, `chat`, `sync`, `observability`) with `pass`, `warn` or `fail`. It shows variable **names** and
+`azureIdentity`, `retrieval`, `embeddings`, `chat`, `sync`, `apiServer`, `teams`,
+`teamsManifest`, `observability`) with `pass`, `warn` or `fail`. It shows variable **names** and
 problems, never values. Exit codes: `0` healthy or warnings only, `1` a failed check, `2` usage
 error. Logs go to stderr as JSON lines; stdout carries only the report.
 
