@@ -66,12 +66,17 @@ describe('Teams manifest', () => {
       id: VARIABLES.TEAMS_APP_ID,
       name: { short: 'E-Hub Assistant (Dev)' },
       bots: [{ botId: VARIABLES.TEAMS_BOT_CLIENT_ID, scopes: ['personal'], supportsFiles: false }],
+      validDomains: ['token.botframework.com'],
+      webApplicationInfo: {
+        id: VARIABLES.TEAMS_BOT_CLIENT_ID,
+        resource: `api://botid-${VARIABLES.TEAMS_BOT_CLIENT_ID}`,
+      },
     });
     expect(result.files?.manifestJson).not.toContain('${{');
     expect(result.warnings.join('\n')).toContain('placeholder icons');
   });
 
-  it('blocks production until SSO exists', () => {
+  it('blocks production until course access from enrolments exists', () => {
     const result = validateManifest({ environment: 'production', env: VARIABLES });
     expect(result.errors).toContain(`blocked: ${PRODUCTION_PACKAGE_BLOCKED}`);
   });
@@ -127,16 +132,13 @@ describe('Teams manifest', () => {
     expect(errors).toContain('schema: / must NOT have additional properties');
   });
 
-  it('refuses team or group chat scopes, other capabilities and early SSO wiring', () => {
+  it('refuses team or group chat scopes, other capabilities and wildcard domains', () => {
     const paths = copy();
     editTemplate(paths, (manifest) => {
       const bots = manifest['bots'] as Record<string, unknown>[];
       bots[0]!['scopes'] = ['personal', 'team'];
-      manifest['webApplicationInfo'] = {
-        id: VARIABLES.TEAMS_BOT_CLIENT_ID,
-        resource: 'api://example.com/x',
-      };
-      manifest['validDomains'] = ['*.example.com'];
+      manifest['composeExtensions'] = [];
+      manifest['validDomains'] = ['*.example.com', 'token.botframework.com'];
     });
     const errors = validateManifest({
       environment: 'development',
@@ -144,8 +146,60 @@ describe('Teams manifest', () => {
       paths,
     }).errors.join('\n');
     expect(errors).toContain('personal scope only');
-    expect(errors).toContain('"webApplicationInfo" is outside');
+    expect(errors).toContain('"composeExtensions" is outside');
     expect(errors).toContain('wildcards');
+  });
+
+  it('requires single sign-on wired to the bot registration', () => {
+    const paths = copy();
+    editTemplate(paths, (manifest) => {
+      manifest['webApplicationInfo'] = {
+        id: VARIABLES.TEAMS_APP_ID,
+        resource: 'api://example.com/x',
+      };
+      manifest['validDomains'] = [];
+    });
+    const errors = validateManifest({ environment: 'development', env: VARIABLES, paths }).errors;
+    expect(errors).toContain('policy: webApplicationInfo.id must be TEAMS_BOT_CLIENT_ID.');
+    expect(errors).toContain('policy: webApplicationInfo.resource must be TEAMS_SSO_RESOURCE.');
+    expect(errors).toContain(
+      'policy: validDomains must include token.botframework.com for the sign-in card.',
+    );
+    editTemplate(paths, (manifest) => {
+      Reflect.deleteProperty(manifest, 'webApplicationInfo');
+    });
+    expect(
+      validateManifest({ environment: 'development', env: VARIABLES, paths }).errors,
+    ).toContain('policy: webApplicationInfo is required for single sign-on.');
+  });
+
+  it('uses TEAMS_SSO_RESOURCE when set, and warns when it does not name the bot', () => {
+    const custom = `api://ehub.example.com/botid-${VARIABLES.TEAMS_BOT_CLIENT_ID}`;
+    const result = validateManifest({
+      environment: 'development',
+      env: { ...VARIABLES, TEAMS_SSO_RESOURCE: custom },
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.join('\n')).not.toContain('sso:');
+    expect(
+      (
+        JSON.parse(result.files?.manifestJson ?? '{}') as {
+          webApplicationInfo: { resource: string };
+        }
+      ).webApplicationInfo.resource,
+    ).toBe(custom);
+    const other = validateManifest({
+      environment: 'development',
+      env: { ...VARIABLES, TEAMS_SSO_RESOURCE: 'api://something-else' },
+    });
+    expect(other.errors).toEqual([]);
+    expect(other.warnings.join('\n')).toContain('sso: TEAMS_SSO_RESOURCE is not');
+    expect(
+      validateManifest({
+        environment: 'development',
+        env: { ...VARIABLES, TEAMS_SSO_RESOURCE: 'https://not-an-api-uri' },
+      }).errors,
+    ).toEqual(['variables: TEAMS_SSO_RESOURCE is missing or invalid.']);
   });
 
   it('refuses secrets in the manifest', () => {
@@ -176,8 +230,8 @@ describe('Teams manifest', () => {
     writeFileSync(
       paths.file('manifest.template.json'),
       readFileSync(paths.file('manifest.template.json'), 'utf8').replace(
-        '"validDomains": []',
-        '"validDomains": ["${{BOT_DOMAIN}}"]',
+        '"validDomains": ["token.botframework.com"]',
+        '"validDomains": ["token.botframework.com", "${{BOT_DOMAIN}}"]',
       ),
     );
     expect(validateManifest({ environment: 'development', env: VARIABLES, paths }).errors).toEqual([

@@ -13,7 +13,7 @@ export const ANSWER_API_PATHS = {
 
 /**
  * Development only: names the mock user. The API accepts it only when its own mock identity is
- * enabled (never in production); phase 13 replaces it with an Entra ID token.
+ * enabled in development. Real callers send an Entra ID access token (Authorization: Bearer).
  */
 export const MOCK_IDENTITY_HEADER = 'x-ehub-mock-identity';
 
@@ -83,7 +83,9 @@ export const API_ERROR_CODES = [
   'not_found',
   'method_not_allowed',
   'unauthenticated',
+  'forbidden',
   'authentication_not_configured',
+  'authentication_unavailable',
   'no_authorized_courses',
   'course_not_authorized',
   'rate_limited',
@@ -106,6 +108,6 @@ export const apiHealthResponseSchema = z.object({
   status: z.enum(['ok', 'degraded']),
   service: z.string(),
   version: z.string(),
-  identityMode: z.enum(['dev-mock', 'none']),
+  identityMode: z.enum(['entra', 'dev-mock', 'entra+dev-mock', 'none']),
 });
 export type ApiHealthResponse = z.output<typeof apiHealthResponseSchema>;

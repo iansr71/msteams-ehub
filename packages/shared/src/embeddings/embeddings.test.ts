@@ -36,7 +36,8 @@ afterAll(() => {
 function setup(overrides: Partial<AzureOpenAIEmbeddingProviderOptions> = {}) {
   const service = new FakeEmbeddingService({ apiKey: API_KEY, dimensions: DIMENSIONS });
   const logLines: string[] = [];
-  // Retry back-off waits only; the rate limiter's sub-millisecond spacing is left out.
+  // Retry back-off waits only (at least baseDelayMs). The rate limiter's spacing, about a
+  // millisecond per request at this rate, is left out: it depends on real time and was flaky.
   const sleeps: number[] = [];
   const provider = new AzureOpenAIEmbeddingProvider({
     endpoint: 'https://contoso.openai.azure.com',
@@ -60,7 +61,7 @@ function setup(overrides: Partial<AzureOpenAIEmbeddingProviderOptions> = {}) {
       sink: { write: (line) => logLines.push(line) },
     }),
     sleep: (ms) => {
-      if (ms >= 2) {
+      if (ms >= 100) {
         sleeps.push(ms);
       }
       return Promise.resolve();

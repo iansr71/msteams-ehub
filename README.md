@@ -8,9 +8,9 @@ user's Moodle course enrolments.
 > discovery, secure extraction (PDF, Moodle Page and Book, HTML, plain text, DOCX, PPTX),
 > structure-aware chunking, the Azure AI Search index, embeddings, filtered retrieval, grounded
 > answers with validated citations, incremental synchronisation (`sync:*`, docs/sync.md), the
-> HTTP answer API (`pnpm api serve`) and the Teams personal app (docs/teams-app.md). Until Entra
-> ID sign-in (phase 13) the app runs only in development with a mock identity; production is
-> blocked. Enrolment-based authorisation follows in phase 14.
+> HTTP answer API (`pnpm api serve`) and the Teams personal app (docs/teams-app.md). Users sign
+> in with Microsoft Entra ID single sign-on (docs/entra-sso.md). Production stays blocked until
+> enrolment-based authorisation (phase 14) limits each user to their own courses.
 
 ## Repository layout
 

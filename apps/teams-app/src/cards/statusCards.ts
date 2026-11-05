@@ -74,6 +74,8 @@ export type ErrorKind =
   | 'question_too_long'
   | 'invalid_question'
   | 'identity_unavailable'
+  | 'sign_in_failed'
+  | 'not_permitted'
   | 'no_access'
   | 'personal_only';
 
@@ -114,8 +116,18 @@ const ERRORS: Readonly<Record<ErrorKind, { title: string; text: string; retry: b
     retry: false,
   },
   identity_unavailable: {
-    title: 'Sign-in is not available yet',
-    text: 'I cannot confirm who you are, so I cannot check which E-Hub courses you can see. Sign-in is being added; until then this app only works in the development environment.',
+    title: 'Sign-in is not available',
+    text: 'I cannot confirm who you are right now, so I cannot check which E-Hub courses you can see. Please try again later; if it keeps happening, contact IT and quote the reference below.',
+    retry: false,
+  },
+  sign_in_failed: {
+    title: 'Sign-in did not work',
+    text: 'I could not confirm your Microsoft sign-in. Please ask again; if it keeps happening, contact IT and quote the reference below.',
+    retry: true,
+  },
+  not_permitted: {
+    title: 'Not available for your account',
+    text: 'Your account is not allowed to use the E-Hub Knowledge Assistant. If you think this is wrong, contact IT and quote the reference below.',
     retry: false,
   },
   no_access: {

@@ -10,7 +10,7 @@ import {
   type FeedbackRequest,
 } from '@ehub/shared/answers';
 
-import type { CallerIdentity } from '../conversation/identity.js';
+import type { CallerCredential } from '../conversation/identity.js';
 
 export type AnswerClientErrorKind =
   /** No response within the timeout. */
@@ -40,7 +40,7 @@ export class AnswerClientError extends Error {
 
 export interface RequestContext {
   readonly correlationId: string;
-  readonly identity: CallerIdentity;
+  readonly credential: CallerCredential;
   readonly signal?: AbortSignal;
 }
 
@@ -74,8 +74,8 @@ function isTimeout(error: unknown): boolean {
 
 /**
  * HTTP client for apps/api. Sends the correlation ID so a Teams turn and its API request share
- * one ID in the logs. Holds no Moodle or Azure credentials: the only identity it can send is
- * the development mock identity (phase 13 replaces this with a user token).
+ * one ID in the logs. Holds no Moodle or Azure credentials: it forwards the user's Entra ID
+ * token from Teams SSO (or, in development, names the mock user). Headers are never logged.
  */
 export class HttpAnswerClient implements AnswerClient {
   readonly #baseUrl: string;
@@ -144,8 +144,10 @@ export class HttpAnswerClient implements AnswerClient {
           'content-type': 'application/json',
           accept: 'application/json',
           [CORRELATION_ID_HEADER]: context.correlationId,
-          // The only identity until phase 13 adds an Entra ID token.
-          [MOCK_IDENTITY_HEADER]: context.identity.userId,
+          // The token is passed through unread; the API validates it.
+          ...(context.credential.kind === 'user-token'
+            ? { authorization: `Bearer ${context.credential.token}` }
+            : { [MOCK_IDENTITY_HEADER]: context.credential.userId }),
         },
         body: JSON.stringify(body),
         signal: AbortSignal.any(signals),

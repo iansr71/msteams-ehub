@@ -51,5 +51,9 @@
       "scopes": ["personal"]
     }
   ],
-  "validDomains": []
+  "validDomains": ["token.botframework.com"],
+  "webApplicationInfo": {
+    "id": "${{TEAMS_BOT_CLIENT_ID}}",
+    "resource": "${{TEAMS_SSO_RESOURCE}}"
+  }
 }

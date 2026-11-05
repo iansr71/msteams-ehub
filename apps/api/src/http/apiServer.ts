@@ -25,6 +25,7 @@ import {
   type RagRequest,
 } from '../rag/ragService.js';
 import { toAnswerResponse } from './answerDto.js';
+import type { CourseAccessResolver } from '../auth/courseAccess.js';
 import type { AuthenticatedCaller, RequestAuthenticator } from './authentication.js';
 import type { FeedbackRecorder } from './feedbackRecorder.js';
 
@@ -36,6 +37,9 @@ export interface Answerer {
 export interface ApiServerOptions {
   readonly answerer: Answerer;
   readonly authenticator: RequestAuthenticator;
+  readonly courseAccess: CourseAccessResolver;
+  /** Named in WWW-Authenticate when a token lacks it. */
+  readonly requiredScope?: string;
   readonly feedback: FeedbackRecorder;
   readonly tenantId: string;
   readonly requestTimeoutMs: number;
@@ -62,7 +66,9 @@ const STATUS_BY_CODE: Readonly<Record<ApiErrorCode, number>> = {
   not_found: 404,
   method_not_allowed: 405,
   unauthenticated: 401,
+  forbidden: 403,
   authentication_not_configured: 503,
+  authentication_unavailable: 503,
   no_authorized_courses: 403,
   course_not_authorized: 403,
   rate_limited: 429,
@@ -78,8 +84,10 @@ const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   not_found: 'Not found.',
   method_not_allowed: 'Method not allowed.',
   unauthenticated: 'The caller could not be authenticated.',
+  forbidden: 'The caller is not allowed to use this service.',
   authentication_not_configured:
     'Sign-in is not configured on this server, so no questions can be answered.',
+  authentication_unavailable: 'Sign-in cannot be checked right now. Try again shortly.',
   no_authorized_courses: 'You do not have access to any E-Hub courses.',
   course_not_authorized: 'You do not have access to the selected course.',
   rate_limited: 'Too many questions; try again shortly.',
@@ -88,7 +96,11 @@ const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
 };
 
 class HttpRequestError extends Error {
-  constructor(readonly code: ApiErrorCode) {
+  constructor(
+    readonly code: ApiErrorCode,
+    /** WWW-Authenticate value for 401/403 responses (RFC 6750). */
+    readonly challenge?: string,
+  ) {
     super(code);
     this.name = 'HttpRequestError';
   }
@@ -178,15 +190,32 @@ export function createApiRequestHandler(
   const logger = options.logger.child({ component: 'http' });
   const clock = options.clock ?? (() => new Date());
 
-  const authenticate = (request: IncomingMessage): AuthenticatedCaller => {
-    const result = options.authenticator.authenticate(request.headers);
-    if (result.kind === 'not_configured') {
-      throw new HttpRequestError('authentication_not_configured');
+  const authenticate = async (request: IncomingMessage): Promise<AuthenticatedCaller> => {
+    const result = await options.authenticator.authenticate(request.headers);
+    switch (result.kind) {
+      case 'authenticated':
+        return result.caller;
+      case 'not_configured':
+        throw new HttpRequestError('authentication_not_configured');
+      case 'unavailable':
+        logger.error('Authentication unavailable.', { reason: result.reason });
+        throw new HttpRequestError('authentication_unavailable');
+      case 'unauthenticated':
+        // Reason codes only: never the token or the Authorization header.
+        logger.warn('Authentication failed.', { reason: result.reason });
+        throw new HttpRequestError(
+          'unauthenticated',
+          result.reason === 'missing_token' ? 'Bearer' : 'Bearer error="invalid_token"',
+        );
+      case 'forbidden':
+        logger.warn('Caller not allowed.', { reason: result.reason });
+        throw new HttpRequestError(
+          'forbidden',
+          result.insufficientScope === undefined
+            ? 'Bearer error="insufficient_scope"'
+            : `Bearer error="insufficient_scope", scope="${options.requiredScope ?? 'access_as_user'}"`,
+        );
     }
-    if (result.kind === 'unauthenticated') {
-      throw new HttpRequestError('unauthenticated');
-    }
-    return result.caller;
   };
 
   const answers = async (
@@ -194,16 +223,23 @@ export function createApiRequestHandler(
     response: ServerResponse,
     correlationId: string,
   ): Promise<void> => {
-    const caller = authenticate(request);
+    const caller = await authenticate(request);
     const body = await readJson(request, answerRequestSchema);
+    const authorizedCourseIds = await options.courseAccess.resolve(caller);
+    logger.info('Caller authenticated.', {
+      method: caller.identity.authentication.method,
+      accountType: caller.identity.authentication.accountType,
+      courses: authorizedCourseIds.length,
+    });
     const signal = AbortSignal.timeout(options.requestTimeoutMs);
     const answer = await options.answerer.ask(
       {
         question: body.question,
         user: {
           tenantId: options.tenantId,
-          userId: caller.userId,
-          authorizedCourseIds: [...caller.authorizedCourseIds],
+          // The validated object ID; never a value from the request.
+          userId: caller.identity.objectId,
+          authorizedCourseIds: [...authorizedCourseIds],
           ...(body.selectedCourseIds === undefined
             ? {}
             : { selectedCourseIds: body.selectedCourseIds }),
@@ -219,12 +255,12 @@ export function createApiRequestHandler(
     response: ServerResponse,
     correlationId: string,
   ): Promise<void> => {
-    const caller = authenticate(request);
+    const caller = await authenticate(request);
     const body = await readJson(request, feedbackRequestSchema);
     await options.feedback.record({
       answerId: body.answerId,
       rating: body.rating,
-      userId: caller.userId,
+      userId: caller.identity.objectId,
       receivedAt: clock().toISOString(),
     });
     send(response, 202, { status: 'recorded' }, correlationId);
@@ -267,6 +303,9 @@ export function createApiRequestHandler(
         let retryAfterMs: number | undefined;
         if (error instanceof HttpRequestError) {
           code = error.code;
+          if (error.challenge !== undefined && !response.headersSent) {
+            response.setHeader('www-authenticate', error.challenge);
+          }
         } else if (error instanceof QuestionValidationError) {
           code = 'invalid_question';
         } else if (error instanceof RagAuthorizationError) {

@@ -50,7 +50,7 @@ const askArgs = z
   })
   .strict();
 
-/** The development command's caller; real user identities arrive with Entra SSO (phase 13). */
+/** The operator's command-line caller; Teams users are identified by Entra ID tokens instead. */
 const CLI_USER_ID = 'cli-operator';
 
 export function describeAskFailure(error: unknown): FailureReport | undefined {

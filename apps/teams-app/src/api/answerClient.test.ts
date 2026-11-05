@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { answer } from '../cards/__fixtures__/answers.js';
 import { AnswerClientError, HttpAnswerClient, type FetchLike } from './answerClient.js';
 
-const identity = { kind: 'dev-mock', userId: 'dev-mock-user' } as const;
+const credential = { kind: 'dev-mock', userId: 'dev-mock-user' } as const;
 
 function client(handler: FetchLike, timeoutMs = 1_000) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -38,7 +38,7 @@ async function expectError(promise: Promise<unknown>): Promise<AnswerClientError
 describe('HttpAnswerClient', () => {
   it('posts the question with correlation and mock identity headers and validates the answer', async () => {
     const { instance, calls } = client(() => Promise.resolve(Response.json(answer())));
-    const result = await instance.ask({ question: 'Q?' }, { correlationId: 'turn-9', identity });
+    const result = await instance.ask({ question: 'Q?' }, { correlationId: 'turn-9', credential });
     expect(result.answerId).toBe('answer-123');
     expect(calls[0]?.url).toBe('http://127.0.0.1:3000/v1/answers');
     const headers = calls[0]?.init.headers as Record<string, string>;
@@ -57,7 +57,7 @@ describe('HttpAnswerClient', () => {
         Promise.resolve(typeof body === 'string' ? new Response(body) : Response.json(body)),
       );
       expect(
-        (await expectError(instance.ask({ question: 'Q?' }, { correlationId: 't', identity })))
+        (await expectError(instance.ask({ question: 'Q?' }, { correlationId: 't', credential })))
           .kind,
       ).toBe('bad_response');
     }
@@ -67,7 +67,7 @@ describe('HttpAnswerClient', () => {
       ),
     );
     expect(
-      (await expectError(big.instance.ask({ question: 'Q?' }, { correlationId: 't', identity })))
+      (await expectError(big.instance.ask({ question: 'Q?' }, { correlationId: 't', credential })))
         .kind,
     ).toBe('bad_response');
   });
@@ -83,7 +83,7 @@ describe('HttpAnswerClient', () => {
       30,
     );
     expect(
-      (await expectError(slow.instance.ask({ question: 'Q?' }, { correlationId: 't', identity })))
+      (await expectError(slow.instance.ask({ question: 'Q?' }, { correlationId: 't', credential })))
         .kind,
     ).toBe('timeout');
 
@@ -91,7 +91,7 @@ describe('HttpAnswerClient', () => {
     expect(
       (
         await expectError(
-          refused.instance.ask({ question: 'Q?' }, { correlationId: 't', identity }),
+          refused.instance.ask({ question: 'Q?' }, { correlationId: 't', credential }),
         )
       ).kind,
     ).toBe('unavailable');
@@ -127,7 +127,7 @@ describe('HttpAnswerClient', () => {
         ),
       );
       const error = await expectError(
-        instance.ask({ question: 'Q?' }, { correlationId: 't', identity }),
+        instance.ask({ question: 'Q?' }, { correlationId: 't', credential }),
       );
       expect(error.kind).toBe(kind);
       expect(error.details.code).toBe(code);
@@ -140,11 +140,11 @@ describe('HttpAnswerClient', () => {
     );
     await instance.sendFeedback(
       { answerId: 'answer-123', rating: 'useful' },
-      { correlationId: 'turn-2', identity },
+      { correlationId: 'turn-2', credential },
     );
     expect(calls[0]?.url).toBe('http://127.0.0.1:3000/v1/feedback');
     await instance
-      .ask({ question: 'Zebra-orchid?' }, { correlationId: 't', identity })
+      .ask({ question: 'Zebra-orchid?' }, { correlationId: 't', credential })
       .catch(() => undefined);
     expect(logs.join('\n')).not.toContain('Zebra-orchid');
   });

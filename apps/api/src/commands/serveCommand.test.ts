@@ -18,20 +18,13 @@ async function run(env: Record<string, string>): Promise<{ exitCode: number; std
 }
 
 describe('pnpm api serve', () => {
-  it('refuses to run in production until Entra SSO exists', async () => {
+  it('refuses to run in production until enrolment-based access exists', async () => {
     const result = await run({ NODE_ENV: 'production' });
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe(PRODUCTION_BLOCKED_MESSAGE);
   });
 
-  it('refuses the mock identity outside development and without courses', async () => {
-    const test = await run({
-      NODE_ENV: 'test',
-      API_DEV_MOCK_IDENTITY: 'true',
-      API_DEV_MOCK_COURSE_IDS: '12',
-    });
-    expect(test.exitCode).toBe(1);
-    expect(test.stdout).toContain('API_DEV_MOCK_IDENTITY');
+  it('refuses a mock identity without courses or with a real-looking user ID', async () => {
     const noCourses = await run({ NODE_ENV: 'development', API_DEV_MOCK_IDENTITY: 'true' });
     expect(noCourses.stdout).toContain('API_DEV_MOCK_COURSE_IDS');
     const badUser = await run({

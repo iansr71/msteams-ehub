@@ -34,9 +34,14 @@ export const API_CONFIG_REQUIREMENTS: readonly ConfigHealthRequirement[] = [
     missingNote: 'Settings for `serve`, the HTTP answer API used by the Teams app.',
   },
   {
+    feature: 'entraAuth',
+    requirement: 'optional',
+    missingNote: 'Needed for `serve` to accept Entra ID sign-in (docs/entra-sso.md).',
+  },
+  {
     feature: 'azureIdentity',
     requirement: 'optional',
-    missingNote: 'Not required until Entra ID SSO is implemented (phase 13).',
+    missingNote: 'Service credentials for Azure resources; Managed Identity in Azure.',
   },
   { feature: 'observability', requirement: 'optional' },
 ];

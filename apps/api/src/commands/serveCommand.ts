@@ -2,20 +2,22 @@ import {
   EXIT_FAILURE,
   EXIT_OK,
   apiServerConfigSchema,
+  cleanEnvironment,
+  entraAuthConfigSchema,
   loadConfig,
   parseCommandArgs,
   readPackageVersion,
   sanitizeText,
   type CommandDefinition,
+  type EnvironmentSource,
 } from '@ehub/shared';
+import type { JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 
 import { startApiServer, type RunningApiServer } from '../http/apiServer.js';
-import {
-  DevMockAuthenticator,
-  noAuthenticator,
-  type RequestAuthenticator,
-} from '../http/authentication.js';
+import { InterimCourseAccess } from '../auth/courseAccess.js';
+import { EntraTokenValidator, entraSigningKeys } from '../auth/entraTokenValidator.js';
+import { createAuthenticator } from '../http/authentication.js';
 import { LoggingFeedbackRecorder, type FeedbackRecorder } from '../http/feedbackRecorder.js';
 import { openRagService, describeAskFailure, type AskCommandDependencies } from './askCommand.js';
 import { SERVICE_NAME } from './health.js';
@@ -25,12 +27,23 @@ export interface ServeCommandDependencies extends AskCommandDependencies {
   readonly createFeedbackRecorder?: () => FeedbackRecorder;
   /** Resolves when the server should stop; SIGINT/SIGTERM by default. */
   readonly waitForShutdown?: (server: RunningApiServer) => Promise<void>;
+  /** For tests: signing keys instead of the tenant's published JWKS. */
+  readonly signingKeys?: JWTVerifyGetKey;
+}
+
+/** Entra validation is configured when the API's registration is named. */
+function entraConfigured(env: EnvironmentSource): boolean {
+  const cleaned = cleanEnvironment(env);
+  return (
+    cleaned['ENTRA_API_CLIENT_ID'] !== undefined ||
+    cleaned['ENTRA_ALLOWED_CLIENT_APP_IDS'] !== undefined
+  );
 }
 
 const serveArgs = z.object({}).strict();
 
 export const PRODUCTION_BLOCKED_MESSAGE =
-  'The answer API cannot run in production yet: Microsoft Entra ID sign-in (phase 13) is required to identify callers.';
+  'The answer API cannot run in production yet: course access from Moodle enrolments (phase 14) is required before real users can be authorised.';
 
 function defaultWaitForShutdown(): Promise<void> {
   return new Promise((resolve) => {
@@ -45,14 +58,15 @@ function defaultWaitForShutdown(): Promise<void> {
 }
 
 /**
- * `pnpm api serve`: the HTTP answer API for the Teams app. Development only until phase 13; the
- * only identity is the explicitly enabled mock identity, and without it every question is
+ * `pnpm api serve`: the HTTP answer API for the Teams app. Callers prove who they are with an
+ * Entra ID access token (or, in development only, the mock identity). Production is refused
+ * until phase 14 limits users to their enrolled courses; without an identity every question is
  * refused (fail closed).
  */
 export function createServeCommand(dependencies: ServeCommandDependencies): CommandDefinition {
   return {
     description:
-      'Run the HTTP answer API (development only until Entra SSO; see docs/teams-app.md).',
+      'Run the HTTP answer API (development only until enrolment-based access; see docs/entra-sso.md).',
     run: (context) =>
       withErrorHandling(
         context,
@@ -65,18 +79,50 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
             return EXIT_FAILURE;
           }
           const config = loadConfig(apiServerConfigSchema, dependencies.env);
-          const authenticator: RequestAuthenticator = config.API_DEV_MOCK_IDENTITY
-            ? new DevMockAuthenticator({
-                nodeEnv: config.NODE_ENV,
-                userId: config.API_DEV_MOCK_USER_ID,
-                authorizedCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
-              })
-            : noAuthenticator;
+          const entra = entraConfigured(dependencies.env)
+            ? loadConfig(entraAuthConfigSchema, dependencies.env)
+            : undefined;
           const { rag, tenantId } = await openRagService(dependencies, context.logger);
+          const authenticator = createAuthenticator(
+            {
+              nodeEnv: config.NODE_ENV,
+              tenantId,
+              mockIdentity: config.API_DEV_MOCK_IDENTITY,
+              mockUserId: config.API_DEV_MOCK_USER_ID,
+              ...(entra === undefined
+                ? {}
+                : {
+                    entra: new EntraTokenValidator({
+                      allowedTenantIds: entra.ENTRA_ALLOWED_TENANT_IDS ?? [entra.AZURE_TENANT_ID],
+                      audiences: [
+                        entra.ENTRA_API_CLIENT_ID,
+                        ...(entra.ENTRA_API_APP_ID_URI === undefined
+                          ? []
+                          : [entra.ENTRA_API_APP_ID_URI]),
+                      ],
+                      requiredScope: entra.ENTRA_API_SCOPE,
+                      allowedClientAppIds: entra.ENTRA_ALLOWED_CLIENT_APP_IDS,
+                      keys:
+                        dependencies.signingKeys ??
+                        entraSigningKeys(entra.ENTRA_AUTHORITY_HOST, entra.AZURE_TENANT_ID),
+                      authorityHost: entra.ENTRA_AUTHORITY_HOST,
+                      clockToleranceSeconds: entra.ENTRA_CLOCK_TOLERANCE_SECONDS,
+                    }),
+                  }),
+            },
+            context.logger,
+          );
+          const courseAccess = new InterimCourseAccess({
+            nodeEnv: config.NODE_ENV,
+            mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
+            devEntraCourseIds: config.API_DEV_ENTRA_COURSE_IDS ?? [],
+          });
           const server = await startApiServer(
             {
               answerer: rag,
               authenticator,
+              courseAccess,
+              ...(entra === undefined ? {} : { requiredScope: entra.ENTRA_API_SCOPE }),
               feedback:
                 dependencies.createFeedbackRecorder?.() ??
                 new LoggingFeedbackRecorder(context.logger),
@@ -91,15 +137,28 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
           context.logger.info('Answer API listening.', {
             url: server.url,
             identityMode: authenticator.mode,
+            courseAccess: courseAccess.mode,
           });
-          context.stdout(
-            [
-              `Answer API listening on ${sanitizeText(server.url, 100)}`,
-              authenticator.mode === 'dev-mock'
-                ? `  DEVELOPMENT MOCK IDENTITY: ${sanitizeText(config.API_DEV_MOCK_USER_ID, 60)}, courses ${(config.API_DEV_MOCK_COURSE_IDS ?? []).join(', ')}`
-                : '  No identity configured: every question is refused (set API_DEV_MOCK_IDENTITY=true for local development).',
-            ].join('\n'),
-          );
+          const lines = [`Answer API listening on ${sanitizeText(server.url, 100)}`];
+          if (authenticator.mode.includes('entra')) {
+            lines.push(
+              `  Entra ID sign-in: tenant ${entra?.AZURE_TENANT_ID ?? ''}, scope ${entra?.ENTRA_API_SCOPE ?? ''}`,
+              courseAccess.mode === 'dev-static'
+                ? `  DEVELOPMENT COURSE ACCESS for every signed-in user: ${(config.API_DEV_ENTRA_COURSE_IDS ?? []).join(', ')}`
+                : '  No course access source yet (phase 14): signed-in users are refused with "no access".',
+            );
+          }
+          if (authenticator.mode.includes('dev-mock')) {
+            lines.push(
+              `  DEVELOPMENT MOCK IDENTITY: ${sanitizeText(config.API_DEV_MOCK_USER_ID, 60)}, courses ${(config.API_DEV_MOCK_COURSE_IDS ?? []).join(', ')}`,
+            );
+          }
+          if (authenticator.mode === 'none') {
+            lines.push(
+              '  No identity configured: every question is refused (see docs/entra-sso.md).',
+            );
+          }
+          context.stdout(lines.join('\n'));
           await (dependencies.waitForShutdown ?? defaultWaitForShutdown)(server);
           await server.close();
           context.logger.info('Answer API stopped.');

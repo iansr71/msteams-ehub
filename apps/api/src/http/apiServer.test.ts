@@ -1,3 +1,16 @@
+import {
+  API_CLIENT_ID,
+  AUTHORITY,
+  BOT_CLIENT_ID,
+  NOW as TOKEN_NOW,
+  OTHER_TENANT,
+  TENANT as TOKEN_TENANT,
+  USER_OID,
+  createTokenKit,
+} from '../auth/__fixtures__/tokens.js';
+import { EntraTokenValidator } from '../auth/entraTokenValidator.js';
+import { InterimCourseAccess } from '../auth/courseAccess.js';
+import { MOCK_OBJECT_ID } from '../auth/userIdentity.js';
 import { createLogger } from '@ehub/shared';
 import {
   MOCK_IDENTITY_HEADER,
@@ -27,6 +40,7 @@ import {
   type RunningApiServer,
 } from './apiServer.js';
 import {
+  EntraBearerAuthenticator,
   DevMockAuthenticator,
   MockIdentityNotAllowedError,
   noAuthenticator,
@@ -124,8 +138,13 @@ async function serve(
         new DevMockAuthenticator({
           nodeEnv: 'development',
           userId: MOCK_USER,
-          authorizedCourseIds: [12, 15],
+          tenantId: TENANT_ID,
         }),
+      courseAccess: new InterimCourseAccess({
+        nodeEnv: 'development',
+        mockCourseIds: [12, 15],
+        devEntraCourseIds: [],
+      }),
       feedback: {
         record: (event) => {
           feedback.push(event);
@@ -185,7 +204,7 @@ describe('answer API', () => {
     expect(JSON.stringify(body)).not.toContain('chunkId');
     expect(h.requests[0]?.user).toEqual({
       tenantId: TENANT_ID,
-      userId: MOCK_USER,
+      userId: MOCK_OBJECT_ID,
       authorizedCourseIds: [12, 15],
       selectedCourseIds: [15],
     });
@@ -241,7 +260,7 @@ describe('answer API', () => {
   it('refuses to construct the mock identity outside development', () => {
     for (const nodeEnv of ['production', 'test']) {
       expect(
-        () => new DevMockAuthenticator({ nodeEnv, userId: MOCK_USER, authorizedCourseIds: [12] }),
+        () => new DevMockAuthenticator({ nodeEnv, userId: MOCK_USER, tenantId: TENANT_ID }),
       ).toThrow(MockIdentityNotAllowedError);
     }
   });
@@ -310,7 +329,7 @@ describe('answer API', () => {
       {
         answerId: 'teams-turn-123',
         rating: 'useful',
-        userId: MOCK_USER,
+        userId: MOCK_OBJECT_ID,
         receivedAt: '2026-11-04T10:00:00.000Z',
       },
     ]);
@@ -378,5 +397,157 @@ describe('answer API', () => {
       body.citations.every((citation) => citation.courseId === 12 || citation.courseId === 15),
     ).toBe(true);
     expect(h.logs.join('\n')).not.toContain(SECRET_SENTENCE);
+  });
+});
+
+describe('answer API with Entra ID tokens', () => {
+  async function entraServer() {
+    const kit = await createTokenKit();
+    const validator = new EntraTokenValidator({
+      allowedTenantIds: [TOKEN_TENANT],
+      audiences: [API_CLIENT_ID],
+      requiredScope: 'access_as_user',
+      allowedClientAppIds: [BOT_CLIENT_ID],
+      keys: kit.keys,
+      authorityHost: AUTHORITY,
+      clockToleranceSeconds: 120,
+      currentDate: () => TOKEN_NOW,
+    });
+    const h = await serve({ authenticator: new EntraBearerAuthenticator(validator) });
+    return { kit, h };
+  }
+
+  it('passes the validated object ID to the answer engine, never a body value', async () => {
+    const { kit, h } = await entraServer();
+    const token = await kit.sign();
+    const response = await post(
+      `${h.url}/v1/answers`,
+      { question: QUESTION },
+      { authorization: `Bearer ${token}` },
+    );
+    // The fake engine answers regardless of courses; course refusal is tested below.
+    expect(response.status).toBe(200);
+    expect(h.requests[0]?.user.userId).toBe(USER_OID);
+    const forged = await post(
+      `${h.url}/v1/answers`,
+      {
+        question: QUESTION,
+        objectId: 'x',
+        tenantId: 'y',
+        roles: ['Admin'],
+        email: 'boss@example.com',
+      },
+      { authorization: `Bearer ${token}` },
+    );
+    expect(forged.status).toBe(400);
+    expect(h.requests).toHaveLength(1);
+    const logs = h.logs.join('\n');
+    expect(logs).not.toContain(token);
+    expect(logs).not.toContain(token.split('.')[2] ?? 'never');
+  });
+
+  it('answers 401 with a Bearer challenge for missing or invalid tokens', async () => {
+    const { kit, h } = await entraServer();
+    const missing = await post(`${h.url}/v1/answers`, { question: QUESTION }, {});
+    expect(missing.status).toBe(401);
+    expect(missing.headers.get('www-authenticate')).toBe('Bearer');
+    const expired = await post(
+      `${h.url}/v1/answers`,
+      { question: QUESTION },
+      {
+        authorization: `Bearer ${await kit.sign({ exp: Math.floor(TOKEN_NOW.getTime() / 1000) - 3600 })}`,
+      },
+    );
+    expect(expired.status).toBe(401);
+    expect(expired.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
+    const body = apiErrorResponseSchema.parse(await expired.json());
+    expect(body.error.code).toBe('unauthenticated');
+    expect(body.correlationId).toBe(expired.headers.get('x-correlation-id'));
+    expect(
+      h.logs.some(
+        (line) =>
+          line.includes('"reason":"token_expired"') &&
+          line.includes(`"correlationId":"${body.correlationId}"`),
+      ),
+    ).toBe(true);
+  });
+
+  it('answers 403 for a valid token from a caller who may not use the API', async () => {
+    const { kit, h } = await entraServer();
+    const scope = await post(
+      `${h.url}/v1/answers`,
+      { question: QUESTION },
+      { authorization: `Bearer ${await kit.sign({ scp: 'User.Read' })}` },
+    );
+    expect(scope.status).toBe(403);
+    expect(scope.headers.get('www-authenticate')).toBe(
+      'Bearer error="insufficient_scope", scope="access_as_user"',
+    );
+    expect(apiErrorResponseSchema.parse(await scope.json()).error.code).toBe('forbidden');
+    const tenant = await post(
+      `${h.url}/v1/answers`,
+      { question: QUESTION },
+      {
+        authorization: `Bearer ${await kit.sign({ tid: OTHER_TENANT, iss: `${AUTHORITY}/${OTHER_TENANT}/v2.0` })}`,
+      },
+    );
+    expect(tenant.status).toBe(403);
+    expect(h.requests).toHaveLength(0);
+  });
+
+  it('answers 403 "no access" for signed-in users without courses (phase 14 adds enrolments)', async () => {
+    const kit = await createTokenKit();
+    const logs: string[] = [];
+    const rag = {
+      ask: (request: RagRequest) =>
+        Promise.reject(
+          request.user.authorizedCourseIds.length === 0
+            ? new RagAuthorizationError('no_authorized_courses', 'x')
+            : new Error('unexpected'),
+        ),
+    };
+    const server = await startApiServer(
+      {
+        answerer: rag,
+        authenticator: new EntraBearerAuthenticator(
+          new EntraTokenValidator({
+            allowedTenantIds: [TOKEN_TENANT],
+            audiences: [API_CLIENT_ID],
+            requiredScope: 'access_as_user',
+            allowedClientAppIds: [BOT_CLIENT_ID],
+            keys: kit.keys,
+            authorityHost: AUTHORITY,
+            clockToleranceSeconds: 120,
+            currentDate: () => TOKEN_NOW,
+          }),
+        ),
+        courseAccess: new InterimCourseAccess({
+          nodeEnv: 'development',
+          mockCourseIds: [12],
+          devEntraCourseIds: [],
+        }),
+        feedback: { record: () => Promise.resolve() },
+        tenantId: TENANT_ID,
+        requestTimeoutMs: 5_000,
+        logger: createLogger({
+          service: 'test',
+          level: 'trace',
+          sink: { write: (line) => logs.push(line) },
+        }),
+        service: 'ehub-api',
+        version: '0.1.0',
+      },
+      { host: '127.0.0.1', port: 0 },
+    );
+    running.push(server);
+    const response = await post(
+      `${server.url}/v1/answers`,
+      { question: QUESTION },
+      { authorization: `Bearer ${await kit.sign()}` },
+    );
+    expect(response.status).toBe(403);
+    expect(apiErrorResponseSchema.parse(await response.json()).error.code).toBe(
+      'no_authorized_courses',
+    );
   });
 });

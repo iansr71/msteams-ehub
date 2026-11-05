@@ -4,15 +4,17 @@ Phase 12 adds the E-Hub Knowledge Assistant as a Microsoft Teams **personal app*
 chat with a bot, on Teams desktop and web (and mobile, which renders the same cards). No
 channels, no group chats, no notifications, no grades or assignments.
 
-**Development only.** Until Microsoft Entra ID single sign-on (phase 13) identifies users,
-the bot and the answer API refuse to start with `NODE_ENV=production`, and `teams:package`
-refuses to build a production package.
+**Sign-in:** users sign in with Microsoft Entra ID single sign-on (phase 13, see
+[entra-sso.md](entra-sso.md)). **Production is still blocked:** until enrolment-based course
+access (phase 14) limits each user to their own courses, the bot and the answer API refuse to
+start with `NODE_ENV=production`, and `teams:package` refuses to build a production package.
 
 ## How it fits together
 
 ```text
 Teams client ──Bot Framework──▶ bot (apps/teams-app, port 3978)
-                                  │  POST /v1/answers   x-correlation-id, x-ehub-mock-identity (dev)
+                                  │  POST /v1/answers   x-correlation-id, Authorization: Bearer <Entra token>
+                                  │                     (development: x-ehub-mock-identity instead)
                                   ▼
                                 answer API (apps/api `serve`, port 3000)
                                   │  retrieval + grounded answer + citation validation (phases 7-10)
@@ -66,21 +68,26 @@ for older clients). The bot answers the button with a short confirmation and for
 pseudonymous user key (a hash), never the question or answer. Storage and reporting arrive with
 the administration UI (phase 15).
 
-## Identity: development mock only
+## Identity
 
 - Teams message fields (`from.id`, `aadObjectId`, names) are **not** used as identity. The
   bot's inbound requests are authenticated by the SDK (Bot Framework token) when bot
   credentials are configured, which proves the request came from Teams, not who the user is to
   our API.
+- **Single sign-on** (phase 13): with `TEAMS_SSO_CONNECTION_NAME` set, the bot gets the user's
+  Entra ID access token through the Azure Bot OAuth connection and forwards it unread as
+  `Authorization: Bearer`; the API validates it. Questions asked before sign-in completes are
+  held and answered afterwards. Setup and behaviour: [entra-sso.md](entra-sso.md).
 - For local development, `TEAMS_DEV_MOCK_IDENTITY=true` (bot) and `API_DEV_MOCK_IDENTITY=true`
   (API) enable an explicit mock user, `dev-mock-user` by default (user IDs must start with
   `dev-mock-`). The API, not the caller, decides the mock user's courses
   (`API_DEV_MOCK_COURSE_IDS`). Every card shows a yellow "Development mode — mock identity"
-  banner.
-- Both switches are refused unless `NODE_ENV=development`, the classes that implement them
-  refuse to be constructed otherwise, and both services refuse to start in production at all.
-- Without the mock identity, the bot answers "Sign-in is not available yet" and the API
-  answers 503 `authentication_not_configured`: fail closed.
+  banner. When SSO is configured, the bot ignores its mock switch.
+- The mock and unauthenticated switches work only with `NODE_ENV=development`; elsewhere they
+  are switched off automatically with a logged warning, the classes that implement them refuse
+  to be constructed, and both services refuse to start in production at all.
+- With no identity configured, the bot answers "Sign-in is not available" and the API answers
+  503 `authentication_not_configured`: fail closed.
 
 ## Rendering and safety
 
@@ -103,24 +110,25 @@ the administration UI (phase 15).
 apps/teams-app/manifest/
   manifest.template.json        manifest v1.24, ${{VARIABLE}} placeholders
   environments/development.json name "E-Hub Assistant (Dev)", accent colour
-  environments/production.json  name "E-Hub Assistant" (packaging blocked until phase 13)
+  environments/production.json  name "E-Hub Assistant" (packaging blocked until phase 14)
   color.png, outline.png        PLACEHOLDER icons
 ```
 
 Variables (environment or `.env`; not secrets, but environment-specific):
 
-| Variable               | Meaning                                                                |
-| ---------------------- | ---------------------------------------------------------------------- |
-| `TEAMS_APP_ID`         | A GUID you generate once per environment (the app's identity in Teams) |
-| `TEAMS_BOT_CLIENT_ID`  | The bot's Microsoft Entra app registration (client) ID                 |
-| `TEAMS_DEVELOPER_NAME` | Shown in the app details, e.g. `Skin Renewal` (max 32 characters)      |
-| `TEAMS_WEBSITE_URL`    | https                                                                  |
-| `TEAMS_PRIVACY_URL`    | https; Skin Renewal's staff privacy notice                             |
-| `TEAMS_TERMS_URL`      | https; terms of use / acceptable-use policy                            |
+| Variable               | Meaning                                                                 |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `TEAMS_APP_ID`         | A GUID you generate once per environment (the app's identity in Teams)  |
+| `TEAMS_BOT_CLIENT_ID`  | The bot's Microsoft Entra app registration (client) ID                  |
+| `TEAMS_SSO_RESOURCE`   | Optional; `webApplicationInfo.resource`, default `api://botid-<bot ID>` |
+| `TEAMS_DEVELOPER_NAME` | Shown in the app details, e.g. `Skin Renewal` (max 32 characters)       |
+| `TEAMS_WEBSITE_URL`    | https                                                                   |
+| `TEAMS_PRIVACY_URL`    | https; Skin Renewal's staff privacy notice                              |
+| `TEAMS_TERMS_URL`      | https; terms of use / acceptable-use policy                             |
 
 ```bash
 pnpm teams:validate                  # development; exit 1 on any problem
-pnpm teams:validate --env production # reports that production is blocked until SSO
+pnpm teams:validate --env production # reports that production is blocked until phase 14
 pnpm teams:package                   # apps/teams-app/build/ehub-assistant-development-<version>.zip
 ```
 
@@ -129,8 +137,10 @@ pnpm teams:package                   # apps/teams-app/build/ehub-assistant-devel
 1. **Microsoft's JSON schema** for manifest v1.24 (bundled in `@microsoft/app-manifest`, so it
    works offline).
 2. **This app's policy**: exactly one bot, personal scope everywhere, no files, no tabs other
-   than the bot's chat and about tabs, no message extensions, connectors or `webApplicationInfo`
-   (SSO is phase 13), no wildcard domains, no all-zero placeholder IDs.
+   than the bot's chat and about tabs, no message extensions or connectors, no wildcard domains, no all-zero placeholder IDs, and
+   single sign-on wired to the bot: `webApplicationInfo.id` is the bot ID, its resource is
+   `TEAMS_SSO_RESOURCE` (warning if it does not end in `botid-<bot ID>`), and `validDomains`
+   includes `token.botframework.com`.
 3. **No secrets**: no secret variable's value, no credential-like property names, no URLs
    with token-like parameters.
 4. **Icons** (below).
@@ -222,26 +232,28 @@ agentsplayground -e http://localhost:3978/api/messages -c msteams
 
 ## Configuration
 
-| Variable                          | Default                 | Notes                                               |
-| --------------------------------- | ----------------------- | --------------------------------------------------- |
-| `TEAMS_BOT_PORT`                  | 3978                    |                                                     |
-| `TEAMS_BOT_CLIENT_ID`             | none                    | Required unless unsigned requests are allowed       |
-| `TEAMS_BOT_CLIENT_SECRET`         | none                    | Local development only; Azure uses Managed Identity |
-| `TEAMS_BOT_TENANT_ID`             | none                    | Single-tenant bot registration                      |
-| `TEAMS_API_BASE_URL`              | `http://127.0.0.1:3000` | Must be https in production                         |
-| `TEAMS_API_TIMEOUT_MS`            | 60000                   | Per question                                        |
-| `TEAMS_DEV_MOCK_IDENTITY`         | false                   | Development only                                    |
-| `TEAMS_DEV_MOCK_USER_ID`          | `dev-mock-user`         | Must match `API_DEV_MOCK_USER_ID`                   |
-| `TEAMS_DEV_ALLOW_UNAUTHENTICATED` | false                   | Development only (Agents Playground)                |
-| `TEAMS_ALLOWED_LINK_HOSTS`        | any https host          | e.g. the E-Hub host name                            |
-| `TEAMS_MAX_CONCURRENT_QUESTIONS`  | 8                       | Further questions get a "busy" card                 |
-| `TEAMS_CARD_MAX_BYTES`            | 24000                   | 8000-28000                                          |
-| `API_HOST`                        | `127.0.0.1`             | Answer API interface                                |
-| `PORT`                            | 3000                    | Answer API port                                     |
-| `API_REQUEST_TIMEOUT_MS`          | 90000                   | Per answer, inside the API                          |
-| `API_DEV_MOCK_IDENTITY`           | false                   | Development only                                    |
-| `API_DEV_MOCK_USER_ID`            | `dev-mock-user`         |                                                     |
-| `API_DEV_MOCK_COURSE_IDS`         | none                    | Required with the mock identity                     |
+| Variable                               | Default                 | Notes                                                        |
+| -------------------------------------- | ----------------------- | ------------------------------------------------------------ |
+| `TEAMS_BOT_PORT`                       | 3978                    |                                                              |
+| `TEAMS_BOT_CLIENT_ID`                  | none                    | Required unless unsigned requests are allowed                |
+| `TEAMS_BOT_CLIENT_SECRET`              | none                    | Local development only; Azure uses Managed Identity          |
+| `TEAMS_BOT_TENANT_ID`                  | none                    | Single-tenant bot registration                               |
+| `TEAMS_API_BASE_URL`                   | `http://127.0.0.1:3000` | Must be https in production                                  |
+| `TEAMS_API_TIMEOUT_MS`                 | 60000                   | Per question                                                 |
+| `TEAMS_DEV_MOCK_IDENTITY`              | false                   | Development only                                             |
+| `TEAMS_DEV_MOCK_USER_ID`               | `dev-mock-user`         | Must match `API_DEV_MOCK_USER_ID`                            |
+| `TEAMS_DEV_ALLOW_UNAUTHENTICATED`      | false                   | Development only (Agents Playground)                         |
+| `TEAMS_ALLOWED_LINK_HOSTS`             | any https host          | e.g. the E-Hub host name                                     |
+| `TEAMS_MAX_CONCURRENT_QUESTIONS`       | 8                       | Further questions get a "busy" card                          |
+| `TEAMS_CARD_MAX_BYTES`                 | 24000                   | 8000-28000                                                   |
+| `API_HOST`                             | `127.0.0.1`             | Answer API interface                                         |
+| `PORT`                                 | 3000                    | Answer API port                                              |
+| `API_REQUEST_TIMEOUT_MS`               | 90000                   | Per answer, inside the API                                   |
+| `API_DEV_MOCK_IDENTITY`                | false                   | Development only                                             |
+| `API_DEV_MOCK_USER_ID`                 | `dev-mock-user`         |                                                              |
+| `API_DEV_MOCK_COURSE_IDS`              | none                    | Required with the mock identity                              |
+| `API_DEV_ENTRA_COURSE_IDS`             | none                    | Development only; courses for signed-in users until phase 14 |
+| `ENTRA_*`, `TEAMS_SSO_CONNECTION_NAME` | none                    | Single sign-on; see [entra-sso.md](entra-sso.md)             |
 
 The SDK also reads `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID` and
 `DANGEROUSLY_ALLOW_UNAUTHENTICATED_REQUESTS` when options are not passed. The bot always passes
@@ -252,10 +264,11 @@ identity is configured). It is unauthenticated and reveals no configuration valu
 
 ## Known limitations
 
-- No real user identity until phase 13, and no enrolment-based course access until phase 14.
+- No enrolment-based course access until phase 14: signed-in users see no courses outside
+  development.
 - **Guest users.** Branch staff use Teams as guests on personal email addresses. Whether guests
-  can install and use a custom org app, and which identity Entra ID SSO returns for them, must
-  be tested in the tenant before phase 13 is designed in detail. This has not been verified.
+  can install the app and complete SSO has not been verified in the tenant; see
+  [entra-sso.md](entra-sso.md#guest-users).
 - Feedback is logged, not stored or reported (phase 15). Any authenticated caller can rate any
   answer ID; ratings carry no content, so the risk is noise, not disclosure.
 - The bot's in-memory state (duplicate detection, in-flight count) is per process; running

@@ -471,8 +471,8 @@ export const API_SERVER_DEFAULTS = {
 } as const;
 
 /*
- * The answer API's HTTP server (phase 12). Until Entra ID SSO (phase 13) the only caller
- * identity is the development mock identity, which is refused outside NODE_ENV=development.
+ * The answer API's HTTP server (phase 12). Callers are identified by Entra ID access tokens
+ * (entraAuthConfigShape); the mock identity is a development switch, ignored elsewhere.
  */
 export const apiServerConfigShape = {
   /** Interface to listen on; loopback by default. */
@@ -482,6 +482,66 @@ export const apiServerConfigShape = {
   API_DEV_MOCK_USER_ID: mockUserId.default(API_SERVER_DEFAULTS.mockUserId),
   /** The mock user's "authorised" courses (until phase 14 reads Moodle enrolments). */
   API_DEV_MOCK_COURSE_IDS: syncCourseIdList.optional(),
+  /**
+   * DEVELOPMENT ONLY: courses every signed-in Entra ID user may ask about, so SSO can be tested
+   * before phase 14 reads Moodle enrolments. Ignored outside NODE_ENV=development.
+   */
+  API_DEV_ENTRA_COURSE_IDS: syncCourseIdList.optional(),
+};
+
+const guidList = z
+  .string()
+  .trim()
+  .transform((value) =>
+    value
+      .split(',')
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => part !== ''),
+  )
+  .pipe(
+    z
+      .array(z.guid({ message: 'Must be comma-separated GUIDs.' }))
+      .min(1)
+      .max(20),
+  )
+  .transform((ids) => [...new Set(ids)]);
+
+export const ENTRA_DEFAULTS = {
+  scope: 'access_as_user',
+  clockToleranceSeconds: 120,
+  authorityHost: 'https://login.microsoftonline.com',
+} as const;
+
+/*
+ * Microsoft Entra ID access tokens for the answer API (phase 13). See docs/entra-sso.md for the
+ * matching app registrations.
+ */
+export const entraAuthConfigShape = {
+  /** The organisation's tenant; sign-in is restricted to it. */
+  AZURE_TENANT_ID: guid('AZURE_TENANT_ID'),
+  /** Defaults to AZURE_TENANT_ID alone. Every tenant listed here may sign in. */
+  ENTRA_ALLOWED_TENANT_IDS: guidList.optional(),
+  /** The answer API's app registration (client) ID: the token audience. */
+  ENTRA_API_CLIENT_ID: guid('ENTRA_API_CLIENT_ID'),
+  /** Also accepted as audience, e.g. api://<ENTRA_API_CLIENT_ID>. */
+  ENTRA_API_APP_ID_URI: z
+    .string()
+    .trim()
+    .regex(/^api:\/\/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]{1,200}$/, {
+      message: 'Must be an api:// URI.',
+    })
+    .optional(),
+  /** The delegated scope a token must carry. */
+  ENTRA_API_SCOPE: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9._-]{1,64}$/, { message: 'Must be a scope name such as access_as_user.' })
+    .default(ENTRA_DEFAULTS.scope),
+  /** Client applications allowed to call the API (the token's azp): the bot's registration. */
+  ENTRA_ALLOWED_CLIENT_APP_IDS: guidList,
+  ENTRA_CLOCK_TOLERANCE_SECONDS: boundedInteger(0, 300, ENTRA_DEFAULTS.clockToleranceSeconds),
+  /** Sovereign clouds only. */
+  ENTRA_AUTHORITY_HOST: serviceUrl({ httpsOnly: true }).default(ENTRA_DEFAULTS.authorityHost),
 };
 
 export const TEAMS_DEFAULTS = {
@@ -507,6 +567,12 @@ export const teamsConfigShape = {
   TEAMS_DEV_MOCK_USER_ID: mockUserId.default(API_SERVER_DEFAULTS.mockUserId),
   /** Local tools such as Microsoft 365 Agents Playground send unsigned requests. */
   TEAMS_DEV_ALLOW_UNAUTHENTICATED: booleanFlag(false),
+  /** The Azure Bot OAuth connection that returns the user's token for the answer API (SSO). */
+  TEAMS_SSO_CONNECTION_NAME: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/, { message: 'Must be an OAuth connection name.' })
+    .optional(),
   /** When set, "Open in E-Hub" links are shown only for these hosts. */
   TEAMS_ALLOWED_LINK_HOSTS: hostList.optional(),
   TEAMS_MAX_CONCURRENT_QUESTIONS: boundedInteger(1, 100, TEAMS_DEFAULTS.maxConcurrentQuestions),
@@ -516,6 +582,12 @@ export const teamsConfigShape = {
 
 /* Values substituted into the Teams app manifest by teams:validate / teams:package. */
 export const teamsManifestConfigShape = {
+  /** webApplicationInfo.resource; defaults to api://botid-<TEAMS_BOT_CLIENT_ID>. */
+  TEAMS_SSO_RESOURCE: z
+    .string()
+    .trim()
+    .regex(/^api:\/\/[A-Za-z0-9._~:/-]{1,200}$/, { message: 'Must be an api:// URI.' })
+    .optional(),
   TEAMS_APP_ID: guid('TEAMS_APP_ID'),
   TEAMS_BOT_CLIENT_ID: guid('TEAMS_BOT_CLIENT_ID'),
   TEAMS_DEVELOPER_NAME: z.string().trim().min(1).max(32),
@@ -566,17 +638,12 @@ export const chunkingConfigSchema = defineConfigSchema(chunkingConfigShape).supe
   },
 );
 export const observabilityConfigSchema = defineConfigSchema(observabilityConfigShape);
+// Outside development the mock identity is switched off by the services (with a warning), not
+// rejected here, so a stray variable cannot stop production from failing closed cleanly.
 export const apiServerConfigSchema = defineConfigSchema(apiServerConfigShape).superRefine(
   (config, ctx) => {
-    if (!config.API_DEV_MOCK_IDENTITY) {
+    if (!config.API_DEV_MOCK_IDENTITY || config.NODE_ENV !== 'development') {
       return;
-    }
-    if (config.NODE_ENV !== 'development') {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['API_DEV_MOCK_IDENTITY'],
-        message: 'The mock identity is only allowed with NODE_ENV=development.',
-      });
     }
     if ((config.API_DEV_MOCK_COURSE_IDS?.length ?? 0) === 0) {
       ctx.addIssue({
@@ -588,15 +655,6 @@ export const apiServerConfigSchema = defineConfigSchema(apiServerConfigShape).su
   },
 );
 export const teamsConfigSchema = defineConfigSchema(teamsConfigShape).superRefine((config, ctx) => {
-  for (const key of ['TEAMS_DEV_MOCK_IDENTITY', 'TEAMS_DEV_ALLOW_UNAUTHENTICATED'] as const) {
-    if (config[key] && config.NODE_ENV !== 'development') {
-      ctx.addIssue({
-        code: 'custom',
-        path: [key],
-        message: 'Only allowed with NODE_ENV=development.',
-      });
-    }
-  }
   if (config.TEAMS_BOT_CLIENT_SECRET !== undefined && config.TEAMS_BOT_CLIENT_ID === undefined) {
     ctx.addIssue({
       code: 'custom',
@@ -606,6 +664,18 @@ export const teamsConfigSchema = defineConfigSchema(teamsConfigShape).superRefin
   }
 });
 export const teamsManifestConfigSchema = defineConfigSchema(teamsManifestConfigShape);
+export const entraAuthConfigSchema = defineConfigSchema(entraAuthConfigShape).superRefine(
+  (config, ctx) => {
+    const allowed = config.ENTRA_ALLOWED_TENANT_IDS;
+    if (allowed !== undefined && !allowed.includes(config.AZURE_TENANT_ID.toLowerCase())) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ENTRA_ALLOWED_TENANT_IDS'],
+        message: 'Must include AZURE_TENANT_ID.',
+      });
+    }
+  },
+);
 export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
 export const chatConfigSchema = defineConfigSchema(chatConfigShape);
 export const syncConfigSchema = defineConfigSchema(syncConfigShape).superRefine((config, ctx) => {
@@ -671,6 +741,14 @@ export const applicationConfigSchema = defineConfigSchema({
   ...chatConfigShape,
   ...syncConfigShape,
   ...apiServerConfigShape,
+  ENTRA_ALLOWED_TENANT_IDS: entraAuthConfigShape.ENTRA_ALLOWED_TENANT_IDS,
+  ENTRA_API_CLIENT_ID: entraAuthConfigShape.ENTRA_API_CLIENT_ID.optional(),
+  ENTRA_API_APP_ID_URI: entraAuthConfigShape.ENTRA_API_APP_ID_URI,
+  ENTRA_API_SCOPE: entraAuthConfigShape.ENTRA_API_SCOPE,
+  ENTRA_ALLOWED_CLIENT_APP_IDS: entraAuthConfigShape.ENTRA_ALLOWED_CLIENT_APP_IDS.optional(),
+  ENTRA_CLOCK_TOLERANCE_SECONDS: entraAuthConfigShape.ENTRA_CLOCK_TOLERANCE_SECONDS,
+  ENTRA_AUTHORITY_HOST: entraAuthConfigShape.ENTRA_AUTHORITY_HOST,
+  TEAMS_SSO_RESOURCE: teamsManifestConfigShape.TEAMS_SSO_RESOURCE,
   // Manifest values are build-time inputs (teams:package), optional for the running services.
   TEAMS_APP_ID: teamsManifestConfigShape.TEAMS_APP_ID.optional(),
   TEAMS_DEVELOPER_NAME: teamsManifestConfigShape.TEAMS_DEVELOPER_NAME.optional(),
@@ -694,6 +772,7 @@ export type SyncConfig = z.output<typeof syncConfigSchema>;
 export type ApiServerConfig = z.output<typeof apiServerConfigSchema>;
 export type TeamsConfig = z.output<typeof teamsConfigSchema>;
 export type TeamsManifestConfig = z.output<typeof teamsManifestConfigSchema>;
+export type EntraAuthConfig = z.output<typeof entraAuthConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -714,6 +793,7 @@ export const CONFIG_FEATURES = {
   apiServer: apiServerConfigSchema,
   teams: teamsConfigSchema,
   teamsManifest: teamsManifestConfigSchema,
+  entraAuth: entraAuthConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -735,5 +815,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   apiServer: Object.keys(apiServerConfigShape),
   teams: Object.keys(teamsConfigShape),
   teamsManifest: Object.keys(teamsManifestConfigShape),
+  entraAuth: Object.keys(entraAuthConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

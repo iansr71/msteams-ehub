@@ -11,7 +11,7 @@ export interface HealthReport {
   readonly status: 'ok' | 'degraded';
   readonly service: string;
   readonly version: string;
-  readonly identityMode: 'dev-mock' | 'none';
+  readonly identityMode: 'entra-sso' | 'dev-mock' | 'none';
   readonly inFlightQuestions: number;
 }
 

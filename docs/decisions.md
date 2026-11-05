@@ -187,3 +187,29 @@ Teams message fields are not proof of identity for the API. Until SSO, both serv
 explicit mock user only with `NODE_ENV=development`, the API decides that user's courses, every
 card carries a "mock identity" banner, and both services (and production packaging) refuse to
 run in production.
+
+## The API validates Entra ID tokens itself; the bot forwards them unread (phase 13)
+
+The bot obtains the user's token through Teams SSO (an Azure Bot OAuth connection) and passes
+it on as `Authorization: Bearer`, without decoding it. Only the answer API decides who the
+caller is, using `jose` against Entra's published keys: RS256 only, issuer bound to the token's
+own tenant (Microsoft signs every tenant's tokens with the same keys, so a valid signature alone
+proves nothing), audience, tenant and calling-app allowlists, the `access_as_user` scope, a user
+(not app-only) token and a GUID object ID. The object ID, not the UPN or email, is the user key:
+it is stable for guests, whose UPN is rewritten by Entra.
+
+## Two app registrations: the bot is the client, the API is the resource (phase 13)
+
+Teams SSO issues a token for the bot's own registration (`api://botid-<bot ID>`); the OAuth
+connection exchanges it on behalf of the user for the API's `access_as_user` scope. A separate
+API registration means the API accepts tokens only for itself, and further clients (for example
+the administration UI in phase 15) can be allowed by ID without sharing the bot's identity.
+The exchange to a custom scope is documented but not yet tested in the tenant (docs/entra-sso.md).
+
+## Development switches turn off instead of failing outside development (phase 13)
+
+Phase 12 refused to start when a mock or unauthenticated switch was set outside development. Now
+that real identity exists, a stray switch in a test or staging environment is switched off with a
+warning, and the service runs with real sign-in. Both outcomes are fail-closed; turning off is
+less fragile for deployments that share variable sets. Production still refuses to start until
+phase 14 limits users to their enrolled courses.

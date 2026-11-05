@@ -15,7 +15,9 @@ import {
   MockIdentityProvider,
   MockIdentityRefusedError,
   noIdentityProvider,
+  ssoIdentityProvider,
   type IdentityProvider,
+  type TurnSignIn,
 } from './identity.js';
 
 const SECRET_QUESTION = 'Zebra-orchid question about peel aftercare?';
@@ -53,7 +55,25 @@ class Sink implements ReplySink {
   }
 }
 
-function setup(options: { identity?: IdentityProvider; maxConcurrent?: number } = {}) {
+/** Teams SSO as the bot sees it: a token once signed in, otherwise a sign-in to start. */
+class FakeSignIn implements TurnSignIn {
+  current: string | undefined;
+  starts = 0;
+  constructor(token?: string) {
+    this.current = token;
+  }
+  token(): Promise<string | undefined> {
+    return Promise.resolve(this.current);
+  }
+  start(): Promise<void> {
+    this.starts += 1;
+    return Promise.resolve();
+  }
+}
+
+function setup(
+  options: { identity?: IdentityProvider; maxConcurrent?: number; now?: () => number } = {},
+) {
   const answers = new FakeAnswers();
   const logs: string[] = [];
   const handler = new ConversationHandler({
@@ -69,11 +89,16 @@ function setup(options: { identity?: IdentityProvider; maxConcurrent?: number } 
     maxCardBytes: 24_000,
     allowedLinkHosts: undefined,
     maxConcurrentQuestions: options.maxConcurrent ?? 4,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   return { handler, answers, logs };
 }
 
-const turn: TurnInfo = { correlationId: 'turn-1', conversationType: 'personal' };
+const turn: TurnInfo = {
+  correlationId: 'turn-1',
+  conversationType: 'personal',
+  conversationKey: 'conv-1',
+};
 
 describe('conversation handler', () => {
   it('welcomes on install and on greetings, with the mock identity marked', async () => {
@@ -97,7 +122,10 @@ describe('conversation handler', () => {
     expect(sink.sent[0]).toEqual({ kind: 'typing' });
     expect(answers.asked[0]).toEqual({
       request: { question: SECRET_QUESTION },
-      context: { correlationId: 'turn-1', identity: { kind: 'dev-mock', userId: 'dev-mock-user' } },
+      context: {
+        correlationId: 'turn-1',
+        credential: { kind: 'dev-mock', userId: 'dev-mock-user' },
+      },
     });
     expect(sink.markdown()).toContain('Sources');
     expect(handler.inFlight).toBe(0);
@@ -111,10 +139,16 @@ describe('conversation handler', () => {
     const { handler, answers } = setup();
     for (const conversationType of ['groupChat', 'channel', 'unknown'] as const) {
       const sink = new Sink();
-      await handler.message({ correlationId: 'c', conversationType, text: SECRET_QUESTION }, sink);
+      await handler.message(
+        { correlationId: 'c', conversationType, conversationKey: 'c', text: SECRET_QUESTION },
+        sink,
+      );
       expect(sink.markdown()).toContain('Personal chat only');
       const welcome = new Sink();
-      await handler.welcome({ correlationId: 'c', conversationType }, welcome);
+      await handler.welcome(
+        { correlationId: 'c', conversationType, conversationKey: 'c' },
+        welcome,
+      );
       expect(welcome.sent).toHaveLength(0);
     }
     expect(answers.asked).toHaveLength(0);
@@ -124,13 +158,13 @@ describe('conversation handler', () => {
     const { handler, answers } = setup({ identity: noIdentityProvider });
     const sink = new Sink();
     await handler.message({ ...turn, text: SECRET_QUESTION }, sink);
-    expect(sink.markdown()).toContain('Sign-in is not available yet');
+    expect(sink.markdown()).toContain('Sign-in is not available');
     expect(sink.markdown()).not.toContain('mock identity');
     const outcome = await handler.action({
       ...turn,
       data: { ehubAction: 'feedback', answerId: 'a-1', rating: 'useful' },
     });
-    expect(outcome.message).toContain('sign-in is not available');
+    expect(outcome.message).toContain('please sign in by asking a question first');
     expect(answers.asked).toHaveLength(0);
     expect(answers.feedback).toHaveLength(0);
   });
@@ -171,7 +205,7 @@ describe('conversation handler', () => {
     ],
     [
       new AnswerClientError('rejected', { status: 503, code: 'authentication_not_configured' }),
-      'Sign-in is not available yet',
+      'Sign-in is not available',
       false,
     ],
     [new Error('boom'), 'Something went wrong', true],
@@ -246,6 +280,7 @@ describe('conversation handler', () => {
         await handler.action({
           correlationId: 'c',
           conversationType: 'channel',
+          conversationKey: 'c',
           data: { ehubAction: 'feedback', answerId: 'a', rating: 'useful' },
         })
       ).message,
@@ -280,5 +315,188 @@ describe('conversation handler', () => {
     );
     expect(answers.feedback).toHaveLength(1);
     expect(sink.markdown()).toContain('Thanks');
+  });
+});
+
+describe('conversation handler with Teams single sign-on', () => {
+  const USER_TOKEN = 'eyJ.header-payload.signature-not-for-logs';
+
+  it('forwards the SSO token as an opaque credential and never logs it', async () => {
+    const { handler, answers, logs } = setup({ identity: ssoIdentityProvider });
+    const signIn = new FakeSignIn(USER_TOKEN);
+    const sink = new Sink();
+    await handler.message({ ...turn, signIn, text: SECRET_QUESTION }, sink);
+    expect(answers.asked[0]?.context).toEqual({
+      correlationId: 'turn-1',
+      credential: { kind: 'user-token', token: USER_TOKEN },
+    });
+    expect(signIn.starts).toBe(0);
+    expect(sink.markdown()).toContain('Sources');
+    expect(sink.markdown()).not.toContain('mock identity');
+    expect(logs.join('\n')).not.toContain('signature-not-for-logs');
+  });
+
+  it('starts sign-in, holds the question, and answers it once sign-in completes', async () => {
+    const { handler, answers, logs } = setup({ identity: ssoIdentityProvider });
+    const signIn = new FakeSignIn();
+    const first = new Sink();
+    await handler.message({ ...turn, signIn, text: SECRET_QUESTION }, first);
+    expect(signIn.starts).toBe(1);
+    expect(answers.asked).toHaveLength(0);
+    expect(first.cards()).toHaveLength(0);
+
+    signIn.current = USER_TOKEN;
+    const resumed = new Sink();
+    await handler.signedIn({ ...turn, signIn }, resumed);
+    expect(answers.asked).toHaveLength(1);
+    expect(answers.asked[0]?.request.question).toBe(SECRET_QUESTION);
+    expect(resumed.markdown()).toContain('Sources');
+    expect(logs.join('\n')).not.toContain('Zebra-orchid');
+
+    // The held question is used once.
+    const again = new Sink();
+    await handler.signedIn({ ...turn, signIn }, again);
+    expect(answers.asked).toHaveLength(1);
+    expect(again.markdown()).toContain('You are signed in');
+  });
+
+  it('keeps held questions per conversation', async () => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    const signIn = new FakeSignIn();
+    await handler.message(
+      { ...turn, conversationKey: 'a', signIn, text: 'question A?' },
+      new Sink(),
+    );
+    await handler.message(
+      { ...turn, conversationKey: 'b', signIn, text: 'question B?' },
+      new Sink(),
+    );
+    signIn.current = USER_TOKEN;
+    await handler.signedIn({ ...turn, conversationKey: 'b', signIn }, new Sink());
+    expect(answers.asked.map((entry) => entry.request.question)).toEqual(['question B?']);
+  });
+
+  it('does not start a second sign-in when the token is still missing after completion', async () => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    const signIn = new FakeSignIn();
+    await handler.message({ ...turn, signIn, text: SECRET_QUESTION }, new Sink());
+    const sink = new Sink();
+    await handler.signedIn({ ...turn, signIn }, sink);
+    expect(signIn.starts).toBe(1);
+    expect(answers.asked).toHaveLength(0);
+    expect(sink.markdown()).toContain('Sign-in is not available');
+  });
+
+  it('drops held questions older than ten minutes', async () => {
+    let clock = 1_000_000;
+    const { handler, answers } = setup({ identity: ssoIdentityProvider, now: () => clock });
+    const signIn = new FakeSignIn();
+    await handler.message({ ...turn, signIn, text: SECRET_QUESTION }, new Sink());
+    clock += 10 * 60_000 + 1;
+    signIn.current = USER_TOKEN;
+    const sink = new Sink();
+    await handler.signedIn({ ...turn, signIn }, sink);
+    expect(answers.asked).toHaveLength(0);
+    expect(sink.markdown()).toContain('You are signed in');
+  });
+
+  it('holds at most 1000 questions, dropping the oldest first', async () => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    const signIn = new FakeSignIn();
+    for (let index = 0; index <= 1_000; index += 1) {
+      await handler.message(
+        {
+          ...turn,
+          conversationKey: `c-${String(index)}`,
+          signIn,
+          text: `question ${String(index)}?`,
+        },
+        new Sink(),
+      );
+    }
+    signIn.current = USER_TOKEN;
+    await handler.signedIn({ ...turn, conversationKey: 'c-0', signIn }, new Sink());
+    await handler.signedIn({ ...turn, conversationKey: 'c-1', signIn }, new Sink());
+    await handler.signedIn({ ...turn, conversationKey: 'c-1000', signIn }, new Sink());
+    expect(answers.asked.map((entry) => entry.request.question)).toEqual([
+      'question 1?',
+      'question 1000?',
+    ]);
+  });
+
+  it('reports a failed sign-in and forgets the held question', async () => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    const signIn = new FakeSignIn();
+    await handler.message({ ...turn, signIn, text: SECRET_QUESTION }, new Sink());
+    const failed = new Sink();
+    await handler.signInFailed({ ...turn, signIn }, failed);
+    expect(failed.markdown()).toContain('Sign-in did not work');
+    signIn.current = USER_TOKEN;
+    await handler.signedIn({ ...turn, signIn }, new Sink());
+    expect(answers.asked).toHaveLength(0);
+  });
+
+  it('fails closed, without logging the error, when the token service fails', async () => {
+    const { handler, answers, logs } = setup({ identity: ssoIdentityProvider });
+    const broken: TurnSignIn = {
+      token: () => Promise.reject(new TypeError('Authorization: Bearer bot-secret-token')),
+      start: () => Promise.resolve(),
+    };
+    const sink = new Sink();
+    await handler.message({ ...turn, signIn: broken, text: SECRET_QUESTION }, sink);
+    expect(answers.asked).toHaveLength(0);
+    expect(sink.markdown()).toContain('Sign-in is not available');
+    expect(logs.join('\n')).toContain('"errorType":"TypeError"');
+    expect(logs.join('\n')).not.toContain('bot-secret-token');
+  });
+
+  it('fails closed when the Teams turn has no sign-in support', async () => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    const sink = new Sink();
+    await handler.message({ ...turn, text: SECRET_QUESTION }, sink);
+    expect(answers.asked).toHaveLength(0);
+    expect(sink.markdown()).toContain('Sign-in is not available');
+  });
+
+  it('records feedback with an existing token but never starts sign-in from a button', async () => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    const signedOut = new FakeSignIn();
+    const refused = await handler.action({
+      ...turn,
+      signIn: signedOut,
+      data: { ehubAction: 'feedback', answerId: 'a-1', rating: 'useful' },
+    });
+    expect(refused.message).toContain('please sign in by asking a question first');
+    expect(signedOut.starts).toBe(0);
+    const signedIn = new FakeSignIn(USER_TOKEN);
+    await handler.action({
+      ...turn,
+      signIn: signedIn,
+      data: { ehubAction: 'feedback', answerId: 'a-1', rating: 'useful' },
+    });
+    expect(answers.feedback[0]?.context.credential).toEqual({
+      kind: 'user-token',
+      token: USER_TOKEN,
+    });
+  });
+
+  it.each([
+    [401, 'unauthenticated', 'Sign-in did not work', true],
+    [403, 'forbidden', 'Not available for your account', false],
+    [503, 'authentication_unavailable', 'Sign-in is not available', false],
+  ] as const)('maps API %s %s to a clear card', async (status, code, title, retry) => {
+    const { handler, answers } = setup({ identity: ssoIdentityProvider });
+    answers.next = () => Promise.reject(new AnswerClientError('rejected', { status, code }));
+    const sink = new Sink();
+    await handler.message(
+      { ...turn, signIn: new FakeSignIn(USER_TOKEN), text: SECRET_QUESTION },
+      sink,
+    );
+    expect(sink.markdown()).toContain(title);
+    const retryButtons = sink
+      .cards()
+      .flatMap(actions)
+      .filter((action) => action.type === 'Action.Execute');
+    expect(retryButtons.length).toBe(retry ? 1 : 0);
   });
 });

@@ -19,14 +19,14 @@ import { decodeRgbaPng, readPngInfo } from './png.js';
  * Builds the Teams app manifest for an environment from manifest/manifest.template.json, then
  * checks it three ways: Microsoft's JSON schema for the manifest version (bundled with
  * @microsoft/app-manifest, so validation works offline), this app's policy (personal scope
- * only, no secrets, SSO not yet), and the icon files.
+ * only, no secrets, bot single sign-on wired to the bot's own registration), and the icons.
  */
 
 export const MANIFEST_ENVIRONMENTS = ['development', 'production'] as const;
 export type ManifestEnvironment = (typeof MANIFEST_ENVIRONMENTS)[number];
 
 export const PRODUCTION_PACKAGE_BLOCKED =
-  'Production packages are blocked until Microsoft Entra ID SSO (phase 13) is implemented: a production app must identify users before it can enforce course access.';
+  'Production packages are blocked until course access from Moodle enrolments (phase 14) is implemented: signed-in users cannot yet be limited to their own courses.';
 
 const environmentFileSchema = z.strictObject({
   environment: z.enum(MANIFEST_ENVIRONMENTS),
@@ -95,6 +95,23 @@ function schemaValidator(): (manifest: unknown) => string[] {
 
 const ZERO_GUID = /^0{8}-0{4}-0{4}-0{4}-0{12}$/;
 
+/** The Bot Framework token service hosts the sign-in pages behind the OAuth card. */
+export const SSO_DOMAIN = 'token.botframework.com';
+
+export function defaultSsoResource(botClientId: string): string {
+  return `api://botid-${botClientId}`;
+}
+
+function policyWarnings(values: Readonly<Record<string, string>>): string[] {
+  const expected = defaultSsoResource(values['TEAMS_BOT_CLIENT_ID'] ?? '');
+  const resource = values['TEAMS_SSO_RESOURCE'] ?? '';
+  return resource === expected || resource.endsWith(`/botid-${values['TEAMS_BOT_CLIENT_ID'] ?? ''}`)
+    ? []
+    : [
+        `sso: TEAMS_SSO_RESOURCE is not ${expected}; check it matches the bot registration's Application ID URI (docs/entra-sso.md).`,
+      ];
+}
+
 function policyErrors(
   manifest: Record<string, unknown>,
   values: Readonly<Record<string, string>>,
@@ -121,7 +138,6 @@ function policyErrors(
     'configurableTabs',
     'composeExtensions',
     'connectors',
-    'webApplicationInfo',
     'authorization',
     'activities',
     'meetingExtensionDefinition',
@@ -139,6 +155,21 @@ function policyErrors(
     : [];
   if (domains.some((domain) => typeof domain !== 'string' || domain.includes('*'))) {
     errors.push('policy: validDomains must not contain wildcards.');
+  }
+  if (!domains.includes(SSO_DOMAIN)) {
+    errors.push(`policy: validDomains must include ${SSO_DOMAIN} for the sign-in card.`);
+  }
+  // Teams issues the SSO token for this resource; a mismatch fails sign-in for every user.
+  const webApp = manifest['webApplicationInfo'] as Record<string, unknown> | undefined;
+  if (webApp === undefined) {
+    errors.push('policy: webApplicationInfo is required for single sign-on.');
+  } else {
+    if (webApp['id'] !== values['TEAMS_BOT_CLIENT_ID']) {
+      errors.push('policy: webApplicationInfo.id must be TEAMS_BOT_CLIENT_ID.');
+    }
+    if (webApp['resource'] !== values['TEAMS_SSO_RESOURCE']) {
+      errors.push('policy: webApplicationInfo.resource must be TEAMS_SSO_RESOURCE.');
+    }
   }
   for (const key of ['TEAMS_APP_ID', 'TEAMS_BOT_CLIENT_ID']) {
     if (ZERO_GUID.test(values[key] ?? '')) {
@@ -267,6 +298,7 @@ export function validateManifest(options: BuildOptions): ValidationResult {
     APP_VERSION: version,
     TEAMS_APP_ID: config.TEAMS_APP_ID,
     TEAMS_BOT_CLIENT_ID: config.TEAMS_BOT_CLIENT_ID,
+    TEAMS_SSO_RESOURCE: config.TEAMS_SSO_RESOURCE ?? defaultSsoResource(config.TEAMS_BOT_CLIENT_ID),
     TEAMS_DEVELOPER_NAME: config.TEAMS_DEVELOPER_NAME,
     TEAMS_WEBSITE_URL: config.TEAMS_WEBSITE_URL,
     TEAMS_PRIVACY_URL: config.TEAMS_PRIVACY_URL,
@@ -310,6 +342,7 @@ export function validateManifest(options: BuildOptions): ValidationResult {
     ...policyErrors(manifest, values),
     ...secretErrors(manifestJson, options.env),
   );
+  warnings.push(...policyWarnings(values));
 
   const colorIcon = readFileSync(join(paths.manifestDir, 'color.png'));
   const outlineIcon = readFileSync(join(paths.manifestDir, 'outline.png'));

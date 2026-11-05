@@ -11,6 +11,7 @@ import {
   SECRET_SENTENCE,
   TENANT_ID,
 } from '../../apps/api/src/retrieval/__fixtures__/corpus.js';
+import { createTokenKit, type TokenKit } from '../../apps/api/src/auth/__fixtures__/tokens.js';
 import { modelAnswer } from '../../apps/api/src/rag/__fixtures__/scriptedChatModel.js';
 import { FakeEmbeddingService } from '../../packages/shared/src/embeddings/__fixtures__/fakeEmbeddingService.js';
 import { buildIndexDefinition } from '../../packages/shared/src/search/indexDefinition.js';
@@ -27,6 +28,10 @@ import {
  * Microsoft 365 Agents Playground), which calls the real answer API (`pnpm api serve`) over
  * HTTP, which uses retrieval and chat against HTTPS imitations of Azure AI Search and Azure
  * OpenAI. The bot's replies go to a local imitation of the Bot Connector service.
+ *
+ * The API also accepts Entra ID tokens: its signing keys come over HTTPS from an imitation of
+ * Entra's discovery endpoint, exactly as in Azure, so the CLI's real key-fetching path is used.
+ * (The bot's half of SSO needs the Bot Framework token service and is covered by unit tests.)
  */
 
 const repoRoot = resolve(import.meta.dirname, '..', '..');
@@ -37,6 +42,12 @@ const QUESTION = 'Quokka-lantern: how often should sunscreen be reapplied after 
 
 let search: HttpsFakeSearch;
 let openai: HttpsFetchServer;
+let entra: HttpsFetchServer;
+let tokens: TokenKit;
+let jwksRequests = 0;
+const API_APP_ID = '3a3a3a3a-3a3a-4a3a-8a3a-3a3a3a3a3a3a';
+const BOT_APP_ID = '4b4b4b4b-4b4b-4b4b-8b4b-4b4b4b4b4b4b';
+const USER_OBJECT_ID = '5c5c5c5c-5c5c-4c5c-8c5c-5c5c5c5c5c5c';
 let connector: Server;
 let connectorUrl: string;
 const posted: { type: string; attachments?: { content: unknown }[] }[] = [];
@@ -126,9 +137,19 @@ beforeAll(async () => {
           }),
         ),
   );
+  tokens = await createTokenKit();
+  entra = await startHttpsFetchServer((url) => {
+    if (new URL(url).pathname === `/${TENANT_ID}/discovery/v2.0/keys`) {
+      jwksRequests += 1;
+      return Promise.resolve(Response.json(tokens.jwks));
+    }
+    return Promise.resolve(new Response('not found', { status: 404 }));
+  });
   writeFileSync(
     join(search.workDir, 'both.pem'),
-    `${readFileSync(search.certFile, 'utf8')}\n${readFileSync(openai.certFile, 'utf8')}`,
+    [search.certFile, openai.certFile, entra.certFile]
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n'),
   );
 
   connector = createServer((request, response) => {
@@ -155,6 +176,10 @@ beforeAll(async () => {
       PORT: String(apiPort),
       API_DEV_MOCK_IDENTITY: 'true',
       API_DEV_MOCK_COURSE_IDS: '12',
+      API_DEV_ENTRA_COURSE_IDS: '12',
+      ENTRA_API_CLIENT_ID: API_APP_ID,
+      ENTRA_ALLOWED_CLIENT_APP_IDS: BOT_APP_ID,
+      ENTRA_AUTHORITY_HOST: entra.endpoint,
       MOODLE_BASE_URL: 'https://ehub.example.test',
       AZURE_SEARCH_ENDPOINT: search.endpoint,
       AZURE_SEARCH_API_KEY: SEARCH_KEY,
@@ -192,6 +217,7 @@ afterAll(async () => {
   }
   await search.close();
   await openai.close();
+  await entra.close();
   await new Promise<void>((done) => {
     connector.closeAllConnections();
     connector.close(() => {
@@ -252,6 +278,91 @@ async function waitFor(predicate: () => boolean, timeoutMs = 20_000): Promise<vo
   }
 }
 
+function userToken(claims: Record<string, unknown> = {}): Promise<string> {
+  // The fixture's times are fixed for unit tests; these processes use the real clock.
+  const now = Math.floor(Date.now() / 1000);
+  return tokens.sign({
+    iat: now - 60,
+    nbf: now - 60,
+    exp: now + 3600,
+    iss: `${entra.endpoint}/${TENANT_ID}/v2.0`,
+    tid: TENANT_ID,
+    aud: API_APP_ID,
+    azp: BOT_APP_ID,
+    oid: USER_OBJECT_ID,
+    ...claims,
+  });
+}
+
+async function askApi(
+  headers: Record<string, string>,
+): Promise<{ status: number; body: Record<string, unknown>; challenge: string | null }> {
+  const response = await fetch(`http://127.0.0.1:${String(apiPort)}/v1/answers`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ question: QUESTION }),
+  });
+  return {
+    status: response.status,
+    body: (await response.json()) as Record<string, unknown>,
+    challenge: response.headers.get('www-authenticate'),
+  };
+}
+
+describe('answer API with Entra ID tokens', () => {
+  it('reports both identity modes in development', async () => {
+    const health = await fetch(`http://127.0.0.1:${String(apiPort)}/health`);
+    expect(await health.json()).toMatchObject({ identityMode: 'entra+dev-mock' });
+  });
+
+  it('answers a signed-in user, fetching Entra signing keys over HTTPS', async () => {
+    const result = await askApi({ authorization: `Bearer ${await userToken()}` });
+    expect(result.status).toBe(200);
+    expect(JSON.stringify(result.body)).toContain('https://ehub.example.test/');
+    expect(jwksRequests).toBeGreaterThan(0);
+  });
+
+  it('rejects tokens that are expired, forged, for another audience or another tenant', async () => {
+    const expired = await askApi({
+      authorization: `Bearer ${await userToken({ exp: Math.floor(Date.now() / 1000) - 3600 })}`,
+    });
+    expect(expired.status).toBe(401);
+    expect(expired.challenge).toBe('Bearer error="invalid_token"');
+
+    const genuine = await userToken();
+    const [header, , signature] = genuine.split('.');
+    const forgedPayload = Buffer.from(
+      JSON.stringify({
+        ...JSON.parse(Buffer.from(genuine.split('.')[1] ?? '', 'base64url').toString('utf8')),
+        oid: '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d',
+      }),
+    ).toString('base64url');
+    expect(
+      (
+        await askApi({
+          authorization: `Bearer ${header ?? ''}.${forgedPayload}.${signature ?? ''}`,
+        })
+      ).status,
+    ).toBe(401);
+
+    expect(
+      (await askApi({ authorization: `Bearer ${await userToken({ aud: BOT_APP_ID })}` })).status,
+    ).toBe(401);
+    expect(
+      (await askApi({ authorization: `Bearer ${await userToken({ scp: 'User.Read' })}` })).status,
+    ).toBe(403);
+    expect((await askApi({})).challenge).toBe('Bearer');
+  });
+
+  it('refuses a request that carries both a token and the mock identity', async () => {
+    const result = await askApi({
+      authorization: `Bearer ${await userToken()}`,
+      'x-ehub-mock-identity': 'dev-mock-user',
+    });
+    expect(result.status).toBe(401);
+  });
+});
+
 describe('Teams → answer API → RAG', () => {
   it('answers a question with an Adaptive Card citing the authorised course', async () => {
     const response = await deliver(activity());
@@ -309,6 +420,7 @@ describe('Teams → answer API → RAG', () => {
       expect(text).not.toContain(SECRET_SENTENCE);
       expect(text).not.toContain(SEARCH_KEY);
       expect(text).not.toContain(OPENAI_KEY);
+      expect(text).not.toContain('eyJ');
     }
   });
 });

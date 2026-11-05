@@ -16,6 +16,7 @@ import {
   runtimeConfigSchema,
   syncConfigSchema,
   apiServerConfigSchema,
+  entraAuthConfigSchema,
   teamsConfigSchema,
 } from './schema.js';
 
@@ -376,9 +377,13 @@ describe('API server and Teams configuration', () => {
       API_DEV_MOCK_USER_ID: 'dev-mock-user',
       API_HOST: '127.0.0.1',
     });
+    // Outside development the switch loads but is ignored at runtime (the server logs a warning).
+    for (const NODE_ENV of ['test', 'production']) {
+      expect(
+        loadConfig(apiServerConfigSchema, { NODE_ENV, API_DEV_MOCK_IDENTITY: 'true' }),
+      ).toMatchObject({ API_DEV_MOCK_IDENTITY: true });
+    }
     for (const env of [
-      { NODE_ENV: 'test', API_DEV_MOCK_IDENTITY: 'true', API_DEV_MOCK_COURSE_IDS: '12' },
-      { NODE_ENV: 'production', API_DEV_MOCK_IDENTITY: 'true', API_DEV_MOCK_COURSE_IDS: '12' },
       { NODE_ENV: 'development', API_DEV_MOCK_IDENTITY: 'true' },
       {
         NODE_ENV: 'development',
@@ -391,7 +396,7 @@ describe('API server and Teams configuration', () => {
     }
   });
 
-  it('keeps Teams development switches out of other environments and the API URL https in production', () => {
+  it('loads Teams development switches anywhere (ignored outside development) and requires https in production', () => {
     expect(
       loadConfig(teamsConfigSchema, {
         NODE_ENV: 'development',
@@ -402,13 +407,16 @@ describe('API server and Teams configuration', () => {
       TEAMS_DEV_MOCK_IDENTITY: true,
       TEAMS_ALLOWED_LINK_HOSTS: ['ehub.example.com'],
     });
-    for (const env of [
-      { NODE_ENV: 'test', TEAMS_DEV_ALLOW_UNAUTHENTICATED: 'true' },
-      {
+    expect(
+      loadConfig(teamsConfigSchema, {
         NODE_ENV: 'production',
         TEAMS_API_BASE_URL: 'https://api.example.com',
         TEAMS_DEV_MOCK_IDENTITY: 'true',
-      },
+        TEAMS_DEV_ALLOW_UNAUTHENTICATED: 'true',
+        TEAMS_SSO_CONNECTION_NAME: 'ehub-sso',
+      }),
+    ).toMatchObject({ TEAMS_DEV_MOCK_IDENTITY: true, TEAMS_SSO_CONNECTION_NAME: 'ehub-sso' });
+    for (const env of [
       { NODE_ENV: 'production', TEAMS_API_BASE_URL: 'http://api.example.com' },
       { NODE_ENV: 'development', TEAMS_BOT_CLIENT_SECRET: 'some-secret-value' },
       { NODE_ENV: 'development', TEAMS_CARD_MAX_BYTES: '40000' },
@@ -416,6 +424,38 @@ describe('API server and Teams configuration', () => {
     ]) {
       expect(() => loadConfig(teamsConfigSchema, env)).toThrow(ConfigValidationError);
     }
+  });
+
+  it('validates Entra ID token settings', () => {
+    const tenant = '11111111-1111-4111-8111-111111111111';
+    const base = {
+      AZURE_TENANT_ID: tenant,
+      ENTRA_API_CLIENT_ID: '33333333-3333-4333-8333-333333333333',
+      ENTRA_ALLOWED_CLIENT_APP_IDS: '44444444-4444-4444-8444-444444444444',
+    };
+    expect(loadConfig(entraAuthConfigSchema, base)).toMatchObject({
+      ENTRA_API_SCOPE: 'access_as_user',
+      ENTRA_CLOCK_TOLERANCE_SECONDS: 120,
+      ENTRA_AUTHORITY_HOST: 'https://login.microsoftonline.com',
+      ENTRA_ALLOWED_CLIENT_APP_IDS: ['44444444-4444-4444-8444-444444444444'],
+    });
+    for (const env of [
+      { ...base, ENTRA_ALLOWED_CLIENT_APP_IDS: undefined },
+      { ...base, ENTRA_API_CLIENT_ID: 'api-app' },
+      { ...base, ENTRA_ALLOWED_TENANT_IDS: '22222222-2222-4222-8222-222222222222' },
+      { ...base, ENTRA_AUTHORITY_HOST: 'http://login.microsoftonline.com' },
+      { ...base, ENTRA_API_APP_ID_URI: 'https://api.example.com' },
+      { ...base, ENTRA_API_SCOPE: 'access as user' },
+      { ...base, ENTRA_CLOCK_TOLERANCE_SECONDS: '3600' },
+    ]) {
+      expect(() => loadConfig(entraAuthConfigSchema, env)).toThrow(ConfigValidationError);
+    }
+    expect(
+      loadConfig(entraAuthConfigSchema, {
+        ...base,
+        ENTRA_ALLOWED_TENANT_IDS: `22222222-2222-4222-8222-222222222222, ${tenant}`,
+      }).ENTRA_ALLOWED_TENANT_IDS,
+    ).toHaveLength(2);
   });
 
   it('treats the bot client secret as a secret', () => {

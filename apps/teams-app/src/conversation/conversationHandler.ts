@@ -6,7 +6,12 @@ import { cardActionDataSchema, type CardActionData } from '../cards/actions.js';
 import { adaptiveCard, fixedText, type AdaptiveCard } from '../cards/adaptiveCard.js';
 import { renderAnswerCard } from '../cards/answerCard.js';
 import { renderErrorCard, renderWelcomeCard, type ErrorKind } from '../cards/statusCards.js';
-import type { IdentityProvider } from './identity.js';
+import type {
+  CallerCredential,
+  CredentialOutcome,
+  IdentityProvider,
+  TurnSignIn,
+} from './identity.js';
 
 export type ConversationType = 'personal' | 'groupChat' | 'channel' | 'unknown';
 
@@ -14,6 +19,13 @@ export interface TurnInfo {
   /** Generated per turn and sent to the API; the card's "Reference". */
   readonly correlationId: string;
   readonly conversationType: ConversationType;
+  /**
+   * Routing key for this user's chat (Teams conversation ID). Used only to resume a question
+   * after sign-in; never sent to the API and never treated as identity.
+   */
+  readonly conversationKey: string;
+  /** Present when Teams single sign-on is configured. */
+  readonly signIn?: TurnSignIn;
 }
 
 export type OutgoingMessage =
@@ -40,9 +52,13 @@ export interface ConversationHandlerOptions {
   readonly maxConcurrentQuestions: number;
   readonly maxQuestionChars?: number;
   readonly suggestions?: readonly string[];
+  readonly now?: () => number;
 }
 
 const GREETING = /^(?:hi|hello|hey|help|start|menu|\/help|\?)[\s!.]*$/i;
+/** A question waiting for sign-in is kept this long. */
+const PENDING_TTL_MS = 10 * 60_000;
+const MAX_PENDING = 1_000;
 const DEFAULT_MAX_QUESTION_CHARS = 1_000;
 
 function cleanQuestion(text: string): string {
@@ -69,7 +85,11 @@ function errorKindFor(error: AnswerClientError): ErrorKind {
         case 'course_not_authorized':
           return 'no_access';
         case 'unauthenticated':
+          return 'sign_in_failed';
+        case 'forbidden':
+          return 'not_permitted';
         case 'authentication_not_configured':
+        case 'authentication_unavailable':
           return 'identity_unavailable';
         case 'invalid_question':
           return 'invalid_question';
@@ -93,12 +113,72 @@ export class ConversationHandler {
   readonly #options: ConversationHandlerOptions;
   readonly #logger: Logger;
   readonly #maxQuestionChars: number;
+  /** Questions asked before sign-in completed, by conversation. In memory only. */
+  readonly #pending = new Map<string, { readonly question: string; readonly at: number }>();
+  readonly #now: () => number;
   #inFlight = 0;
 
   constructor(options: ConversationHandlerOptions) {
     this.#options = options;
     this.#logger = options.logger.child({ component: 'conversation' });
     this.#maxQuestionChars = options.maxQuestionChars ?? DEFAULT_MAX_QUESTION_CHARS;
+    this.#now = options.now ?? Date.now;
+  }
+
+  #remember(key: string, question: string): void {
+    const now = this.#now();
+    this.#pending.delete(key);
+    for (const [entry, value] of this.#pending) {
+      if (now - value.at > PENDING_TTL_MS || this.#pending.size >= MAX_PENDING) {
+        this.#pending.delete(entry);
+      }
+    }
+    this.#pending.set(key, { question, at: now });
+  }
+
+  #takePending(key: string): string | undefined {
+    const entry = this.#pending.get(key);
+    this.#pending.delete(key);
+    return entry !== undefined && this.#now() - entry.at <= PENDING_TTL_MS
+      ? entry.question
+      : undefined;
+  }
+
+  /**
+   * Token-service failures fail closed. Only the error's class name is logged: SDK HTTP errors
+   * can carry request headers, including the bot's own authorization header.
+   */
+  async #credential(
+    turn: TurnInfo,
+    options: { readonly startSignIn: boolean },
+  ): Promise<CredentialOutcome> {
+    try {
+      return await this.#options.identity.credential(turn.signIn, options);
+    } catch (error) {
+      this.#logger.warn('Could not obtain the user token.', {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      return { kind: 'unavailable' };
+    }
+  }
+
+  /** Teams reported sign-in complete: answer the question that was waiting, if any. */
+  async signedIn(turn: TurnInfo, sink: ReplySink): Promise<void> {
+    const question = this.#takePending(turn.conversationKey);
+    this.#logger.info('Sign-in completed.', { resumedQuestion: question !== undefined });
+    if (question === undefined) {
+      await sink.send({ kind: 'card', card: notice('You are signed in. Ask me a question.') });
+      return;
+    }
+    // No second sign-in from here: if the new token is still missing, fail rather than loop.
+    await this.#ask(turn, question, sink, { startSignIn: false });
+  }
+
+  /** Teams reported that sign-in failed or was cancelled. */
+  async signInFailed(turn: TurnInfo, sink: ReplySink): Promise<void> {
+    this.#pending.delete(turn.conversationKey);
+    this.#logger.warn('Sign-in failed.');
+    await this.#error(turn, sink, 'sign_in_failed');
   }
 
   get inFlight(): number {
@@ -166,14 +246,14 @@ export class ConversationHandler {
         followUp: (sink) => this.#ask(turn, question, sink),
       };
     }
-    const identity = this.#options.identity.resolve();
-    if (identity === undefined) {
-      return { message: 'Feedback could not be saved: sign-in is not available yet.' };
+    const outcome = await this.#credential(turn, { startSignIn: false });
+    if (outcome.kind !== 'credential') {
+      return { message: 'Feedback could not be saved: please sign in by asking a question first.' };
     }
     try {
       await this.#options.answers.sendFeedback(
         { answerId: data.answerId, rating: data.rating },
-        { correlationId: turn.correlationId, identity },
+        { correlationId: turn.correlationId, credential: outcome.credential },
       );
       this.#logger.info('Feedback sent.', { answerId: data.answerId, rating: data.rating });
       return { message: 'Thanks — your feedback was recorded.' };
@@ -185,16 +265,27 @@ export class ConversationHandler {
     }
   }
 
-  async #ask(turn: TurnInfo, question: string, sink: ReplySink): Promise<void> {
+  async #ask(
+    turn: TurnInfo,
+    question: string,
+    sink: ReplySink,
+    options: { readonly startSignIn: boolean } = { startSignIn: true },
+  ): Promise<void> {
     if (Array.from(question).length > this.#maxQuestionChars) {
       await this.#error(turn, sink, 'question_too_long');
       return;
     }
-    const identity = this.#options.identity.resolve();
-    if (identity === undefined) {
+    const outcome = await this.#credential(turn, options);
+    if (outcome.kind === 'sign_in_started') {
+      this.#remember(turn.conversationKey, question);
+      this.#logger.info('Sign-in started; question held until it completes.');
+      return;
+    }
+    if (outcome.kind === 'unavailable') {
       await this.#error(turn, sink, 'identity_unavailable');
       return;
     }
+    const credential: CallerCredential = outcome.credential;
     if (this.#inFlight >= this.#options.maxConcurrentQuestions) {
       await this.#error(turn, sink, 'busy', question);
       return;
@@ -207,7 +298,7 @@ export class ConversationHandler {
       try {
         response = await this.#options.answers.ask(
           { question },
-          { correlationId: turn.correlationId, identity },
+          { correlationId: turn.correlationId, credential },
         );
       } catch (error) {
         const kind = error instanceof AnswerClientError ? errorKindFor(error) : 'bad_response';

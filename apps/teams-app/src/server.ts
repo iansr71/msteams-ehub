@@ -12,15 +12,21 @@ import { ConversationHandler } from './conversation/conversationHandler.js';
 import {
   MockIdentityProvider,
   noIdentityProvider,
+  ssoIdentityProvider,
   type IdentityProvider,
 } from './conversation/identity.js';
 import { NodeHttpAdapter } from './teams/httpAdapter.js';
-import { createTeamsBot, type TeamsBot } from './teams/teamsAdapter.js';
+import {
+  createTeamsBot,
+  oauthConnectionSso,
+  type SsoAdapter,
+  type TeamsBot,
+} from './teams/teamsAdapter.js';
 
 export const SERVICE_NAME = 'ehub-teams-app';
 
 export const PRODUCTION_BLOCKED_MESSAGE =
-  'The Teams app cannot run in production yet: Microsoft Entra ID single sign-on (phase 13) is required before users can be identified.';
+  'The Teams app cannot run in production yet: course access from Moodle enrolments (phase 14) is required before real users can be authorised.';
 
 export class TeamsStartupError extends Error {
   constructor(message: string) {
@@ -38,18 +44,22 @@ export interface TeamsServerDependencies {
   readonly host?: string;
   /** Overrides TEAMS_BOT_PORT (0 picks a free port). */
   readonly port?: number;
+  /** For tests: replaces the Azure Bot OAuth connection. */
+  readonly sso?: SsoAdapter;
 }
 
 export interface RunningTeamsServer {
   readonly bot: TeamsBot;
   readonly port: number | undefined;
   readonly identityMode: IdentityProvider['mode'];
+  /** True only in development with TEAMS_DEV_ALLOW_UNAUTHENTICATED. */
+  readonly unauthenticatedRequestsAllowed: boolean;
   stop(): Promise<void>;
 }
 
 /**
- * Starts the bot. Refuses production (no SSO yet), refuses to run with neither bot credentials
- * nor the explicit development opt-in for unsigned requests, and never holds Moodle or Azure
+ * Starts the bot. Refuses production (no course authorisation yet), refuses to run with
+ * neither bot credentials nor the explicit development opt-in for unsigned requests, and never holds Moodle or Azure
  * service credentials: answers come from the answer API.
  */
 export async function startTeamsServer(
@@ -60,15 +70,52 @@ export async function startTeamsServer(
     throw new TeamsStartupError(PRODUCTION_BLOCKED_MESSAGE);
   }
   const config = loadConfig(teamsConfigSchema, dependencies.env);
-  if (config.TEAMS_BOT_CLIENT_ID === undefined && !config.TEAMS_DEV_ALLOW_UNAUTHENTICATED) {
+  const { logger } = dependencies;
+  const development = config.NODE_ENV === 'development';
+  // Development switches are turned off automatically elsewhere, so a stray variable is harmless.
+  for (const [name, set] of [
+    ['TEAMS_DEV_MOCK_IDENTITY', config.TEAMS_DEV_MOCK_IDENTITY],
+    ['TEAMS_DEV_ALLOW_UNAUTHENTICATED', config.TEAMS_DEV_ALLOW_UNAUTHENTICATED],
+  ] as const) {
+    if (set && !development) {
+      logger.warn(`${name} ignored: it only works with NODE_ENV=development.`, {
+        nodeEnv: config.NODE_ENV,
+      });
+    }
+  }
+  const allowUnauthenticated = development && config.TEAMS_DEV_ALLOW_UNAUTHENTICATED;
+  const sso =
+    dependencies.sso ??
+    (config.TEAMS_SSO_CONNECTION_NAME === undefined
+      ? undefined
+      : oauthConnectionSso(config.TEAMS_SSO_CONNECTION_NAME));
+  if (
+    sso !== undefined &&
+    config.TEAMS_BOT_CLIENT_ID === undefined &&
+    dependencies.sso === undefined
+  ) {
+    throw new TeamsStartupError(
+      'Teams single sign-on needs the bot registration: set TEAMS_BOT_CLIENT_ID (see docs/entra-sso.md).',
+    );
+  }
+  if (config.TEAMS_BOT_CLIENT_ID === undefined && !allowUnauthenticated) {
     throw new TeamsStartupError(
       'Set TEAMS_BOT_CLIENT_ID (and TEAMS_BOT_CLIENT_SECRET locally) so incoming Teams requests can be verified, or TEAMS_DEV_ALLOW_UNAUTHENTICATED=true for a local test tool such as Microsoft 365 Agents Playground.',
     );
   }
-  const { logger } = dependencies;
-  const identity: IdentityProvider = config.TEAMS_DEV_MOCK_IDENTITY
-    ? new MockIdentityProvider({ nodeEnv: config.NODE_ENV, userId: config.TEAMS_DEV_MOCK_USER_ID })
-    : noIdentityProvider;
+  // SSO wins when configured; the mock is a development fallback only.
+  let identity: IdentityProvider = noIdentityProvider;
+  if (sso !== undefined) {
+    identity = ssoIdentityProvider;
+    if (config.TEAMS_DEV_MOCK_IDENTITY) {
+      logger.warn('TEAMS_DEV_MOCK_IDENTITY ignored: Teams single sign-on is configured.');
+    }
+  } else if (development && config.TEAMS_DEV_MOCK_IDENTITY) {
+    identity = new MockIdentityProvider({
+      nodeEnv: config.NODE_ENV,
+      userId: config.TEAMS_DEV_MOCK_USER_ID,
+    });
+  }
   const handler = new ConversationHandler({
     answers: new HttpAnswerClient({
       baseUrl: config.TEAMS_API_BASE_URL ?? TEAMS_DEFAULTS.apiBaseUrl,
@@ -101,7 +148,8 @@ export async function startTeamsServer(
     handler,
     logger,
     httpAdapter: http,
-    allowUnauthenticated: config.TEAMS_DEV_ALLOW_UNAUTHENTICATED,
+    allowUnauthenticated,
+    ...(sso === undefined ? {} : { sso }),
     ...(config.TEAMS_BOT_CLIENT_ID === undefined
       ? {}
       : {
@@ -119,13 +167,14 @@ export async function startTeamsServer(
   await bot.app.start(dependencies.port ?? config.TEAMS_BOT_PORT);
   logger.info('Teams app started.', {
     identityMode: identity.mode,
-    unauthenticatedRequestsAllowed: config.TEAMS_DEV_ALLOW_UNAUTHENTICATED,
+    unauthenticatedRequestsAllowed: allowUnauthenticated,
     botCredentials: config.TEAMS_BOT_CLIENT_ID !== undefined,
   });
   return {
     bot,
     port: http.port,
     identityMode: identity.mode,
+    unauthenticatedRequestsAllowed: allowUnauthenticated,
     stop: async () => {
       await bot.app.stop();
       await bot.tasks.idle();

@@ -11,7 +11,7 @@ import {
   startTeamsServer,
   type RunningTeamsServer,
 } from '../server.js';
-import { RecentActivities, sdkLogger } from './teamsAdapter.js';
+import { RecentActivities, sdkLogger, type SsoAdapter } from './teamsAdapter.js';
 
 /*
  * The real Teams SDK app on the node:http adapter. Activities are posted to /api/messages the
@@ -85,10 +85,14 @@ const devEnv = {
   TEAMS_API_BASE_URL: 'http://answers.local',
 };
 
-async function start(env: Record<string, string> = devEnv): Promise<RunningTeamsServer> {
+async function start(
+  env: Record<string, string> = devEnv,
+  sso?: SsoAdapter,
+): Promise<RunningTeamsServer> {
   await startConnector();
   const server = await startTeamsServer({
     env,
+    ...(sso === undefined ? {} : { sso }),
     logger,
     host: '127.0.0.1',
     port: 0,
@@ -178,6 +182,124 @@ async function settle(server: RunningTeamsServer): Promise<void> {
 function cardText(entry: ConnectorActivity | undefined): string {
   return JSON.stringify(entry?.attachments?.[0]?.content ?? {});
 }
+
+type Callbacks = Parameters<SsoAdapter['register']>[1];
+type Context = Parameters<SsoAdapter['forContext']>[0];
+
+/** Stands in for the Azure Bot OAuth connection, which needs the Bot Framework token service. */
+class FakeSso implements SsoAdapter {
+  token: string | undefined;
+  starts = 0;
+  callbacks: Callbacks | undefined;
+  lastContext: Context | undefined;
+  register(_app: unknown, callbacks: Callbacks): void {
+    this.callbacks = callbacks;
+  }
+  forContext(ctx: Context) {
+    this.lastContext = ctx;
+    return {
+      token: () => Promise.resolve(this.token),
+      start: () => {
+        this.starts += 1;
+        return Promise.resolve();
+      },
+    };
+  }
+}
+
+const ssoEnv = {
+  NODE_ENV: 'development',
+  TEAMS_DEV_ALLOW_UNAUTHENTICATED: 'true',
+  TEAMS_API_BASE_URL: 'http://answers.local',
+};
+const USER_TOKEN = 'eyJhbGciOiJSUzI1NiJ9.user-token-payload.user-token-signature';
+
+describe('Teams bot with single sign-on', () => {
+  it('starts sign-in, then answers the held question with the user token as Bearer', async () => {
+    const sso = new FakeSso();
+    const server = await start(ssoEnv, sso);
+    expect(server.identityMode).toBe('entra-sso');
+    await deliver(server, activity());
+    await settle(server);
+    expect(sso.starts).toBe(1);
+    expect(apiCalls).toHaveLength(0);
+
+    sso.token = USER_TOKEN;
+    const ctx = sso.lastContext;
+    if (ctx === undefined || sso.callbacks === undefined) {
+      throw new Error('SSO was not wired into the bot.');
+    }
+    await sso.callbacks.completed(ctx);
+    await settle(server);
+    expect(apiCalls).toHaveLength(1);
+    expect(apiCalls[0]?.headers.authorization).toBe(`Bearer ${USER_TOKEN}`);
+    expect(apiCalls[0]?.headers['x-ehub-mock-identity']).toBeUndefined();
+    // Teams sender fields never stand in for identity.
+    expect(JSON.stringify(apiCalls[0]?.body)).not.toContain('beef');
+    expect(cardText(posted.at(-1))).toContain('Sun protection after peels');
+    expect(logs.join('\n')).not.toContain('user-token-signature');
+  });
+
+  it('answers at once when Teams already holds a token', async () => {
+    const sso = new FakeSso();
+    sso.token = USER_TOKEN;
+    const server = await start(ssoEnv, sso);
+    await deliver(server, activity());
+    await settle(server);
+    expect(sso.starts).toBe(0);
+    expect(apiCalls[0]?.headers.authorization).toBe(`Bearer ${USER_TOKEN}`);
+  });
+
+  it('reports a failed sign-in', async () => {
+    const sso = new FakeSso();
+    const server = await start(ssoEnv, sso);
+    await deliver(server, activity());
+    await settle(server);
+    const ctx = sso.lastContext;
+    if (ctx === undefined || sso.callbacks === undefined) {
+      throw new Error('SSO was not wired into the bot.');
+    }
+    await sso.callbacks.failed(ctx);
+    await settle(server);
+    expect(cardText(posted.at(-1))).toContain('Sign-in did not work');
+    expect(apiCalls).toHaveLength(0);
+  });
+
+  it('prefers SSO over the mock identity and needs the bot registration for a real connection', async () => {
+    const sso = new FakeSso();
+    sso.token = USER_TOKEN;
+    const server = await start({ ...ssoEnv, TEAMS_DEV_MOCK_IDENTITY: 'true' }, sso);
+    expect(server.identityMode).toBe('entra-sso');
+    await deliver(server, activity());
+    await settle(server);
+    expect(apiCalls[0]?.headers['x-ehub-mock-identity']).toBeUndefined();
+    await expect(
+      startTeamsServer({
+        env: { ...ssoEnv, TEAMS_SSO_CONNECTION_NAME: 'ehub-sso' },
+        logger,
+        port: 0,
+      }),
+    ).rejects.toThrow(TeamsStartupError);
+  });
+});
+
+describe('Teams bot development switches', () => {
+  it('ignores the mock identity and unauthenticated requests outside development', async () => {
+    const server = await start({
+      NODE_ENV: 'test',
+      TEAMS_BOT_CLIENT_ID: '00000000-0000-4000-8000-0000000000b0',
+      TEAMS_BOT_CLIENT_SECRET: 'local-dev-secret-value',
+      TEAMS_DEV_MOCK_IDENTITY: 'true',
+      TEAMS_DEV_ALLOW_UNAUTHENTICATED: 'true',
+    });
+    expect(server.identityMode).toBe('none');
+    expect(server.unauthenticatedRequestsAllowed).toBe(false);
+    const log = logs.join('\n');
+    expect(log).toContain('TEAMS_DEV_MOCK_IDENTITY ignored');
+    expect(log).toContain('TEAMS_DEV_ALLOW_UNAUTHENTICATED ignored');
+    expect((await deliver(server, activity())).status).toBe(401);
+  });
+});
 
 describe('Teams bot over HTTP', () => {
   it('serves /health', async () => {
@@ -307,7 +429,7 @@ describe('Teams bot over HTTP', () => {
     });
     await deliver(server, activity());
     await settle(server);
-    expect(cardText(posted.at(-1))).toContain('Sign-in is not available yet');
+    expect(cardText(posted.at(-1))).toContain('Sign-in is not available');
     expect(apiCalls).toHaveLength(0);
     const health = (await (
       await fetch(`http://127.0.0.1:${String(server.port)}/health`)

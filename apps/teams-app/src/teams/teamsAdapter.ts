@@ -14,6 +14,7 @@ import {
 import type { IAdaptiveCard } from '@microsoft/teams.cards';
 
 import type { AdaptiveCard } from '../cards/adaptiveCard.js';
+import type { TurnSignIn } from '../conversation/identity.js';
 import type {
   ConversationHandler,
   ConversationType,
@@ -154,6 +155,54 @@ export class RecentActivities {
   }
 }
 
+/**
+ * Teams single sign-on: obtains the user's token for the answer API through an Azure Bot
+ * OAuth connection (SSO token exchange; a sign-in card when consent is needed). Behind an
+ * interface so the rest of the bot can be tested without the Bot Framework token service.
+ */
+export interface SsoAdapter {
+  register(
+    app: App,
+    callbacks: {
+      readonly completed: (ctx: IActivityContext) => Promise<void>;
+      readonly failed: (ctx: IActivityContext) => Promise<void>;
+    },
+  ): void;
+  forContext(ctx: IActivityContext): TurnSignIn;
+}
+
+/** The SDK's OAuth flow for one Azure Bot OAuth connection. */
+export function oauthConnectionSso(connectionName: string): SsoAdapter {
+  let flow: ReturnType<App['addOAuthFlow']> | undefined;
+  return {
+    register: (app, callbacks) => {
+      flow = app.addOAuthFlow(connectionName, {
+        oauthCardText: 'Sign in to the E-Hub Knowledge Assistant with your Skin Renewal account.',
+        signInButtonText: 'Sign in',
+      });
+      flow.onSignInComplete(async (ctx) => {
+        await callbacks.completed(ctx);
+      });
+      flow.onSignInFailure(async (ctx) => {
+        await callbacks.failed(ctx);
+      });
+    },
+    forContext: (ctx) => ({
+      token: async () => {
+        if (flow === undefined) {
+          return undefined;
+        }
+        return await flow.getToken(ctx);
+      },
+      start: async () => {
+        if (flow !== undefined) {
+          await flow.signIn(ctx);
+        }
+      },
+    }),
+  };
+}
+
 export interface TeamsBotOptions {
   readonly handler: ConversationHandler;
   readonly logger: Logger;
@@ -166,6 +215,8 @@ export interface TeamsBotOptions {
   };
   /** Development only: accept unsigned requests (Microsoft 365 Agents Playground). */
   readonly allowUnauthenticated: boolean;
+  /** Teams SSO; without it the bot can only use the development mock identity. */
+  readonly sso?: SsoAdapter;
   readonly newCorrelationId?: () => string;
 }
 
@@ -208,6 +259,8 @@ export function createTeamsBot(options: TeamsBotOptions): TeamsBot {
   const turnOf = (ctx: IActivityContext): TurnInfo => ({
     correlationId: newCorrelationId(),
     conversationType: conversationTypeOf(ctx.activity.conversation.conversationType),
+    conversationKey: ctx.activity.conversation.id,
+    ...(options.sso === undefined ? {} : { signIn: options.sso.forContext(ctx) }),
   });
 
   const sinkOf = (ctx: IActivityContext): ReplySink => ({
@@ -215,6 +268,20 @@ export function createTeamsBot(options: TeamsBotOptions): TeamsBot {
       await (message.kind === 'typing'
         ? ctx.send({ type: 'typing' })
         : ctx.send(toTeamsCard(message.card)));
+    },
+  });
+
+  options.sso?.register(app, {
+    completed: async (ctx) => {
+      const turn = turnOf(ctx);
+      const sink = sinkOf(ctx);
+      // The sign-in invoke is answered by the SDK; the held question is answered afterwards.
+      tasks.run(() => runWithCorrelationId(turn.correlationId, () => handler.signedIn(turn, sink)));
+      await Promise.resolve();
+    },
+    failed: async (ctx) => {
+      const turn = turnOf(ctx);
+      await runWithCorrelationId(turn.correlationId, () => handler.signInFailed(turn, sinkOf(ctx)));
     },
   });
 
