@@ -79,6 +79,15 @@ const searchIndexName = z
       'Must be 2-128 lowercase letters, digits or single dashes, starting and ending alphanumerically.',
   });
 
+/** Entra app roles of the API registration (docs/admin.md). */
+export const ADMIN_ROLES = [
+  'EHub.User',
+  'EHub.ContentAdministrator',
+  'EHub.ApplicationAdministrator',
+  'EHub.Auditor',
+] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
 export const runtimeConfigShape = {
   NODE_ENV: z.enum(NODE_ENVIRONMENTS).default('development'),
   LOG_LEVEL: z.enum(LOG_LEVEL_SETTINGS).default('info'),
@@ -487,6 +496,18 @@ export const apiServerConfigShape = {
    * authorisation is not configured (no MOODLE_TOKEN). Ignored outside NODE_ENV=development.
    */
   API_DEV_ENTRA_COURSE_IDS: syncCourseIdList.optional(),
+  /** DEVELOPMENT ONLY: app roles for the mock identity, e.g. to try the admin area. */
+  API_DEV_MOCK_ROLES: z
+    .string()
+    .trim()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part !== ''),
+    )
+    .pipe(z.array(z.enum(ADMIN_ROLES)).max(4))
+    .optional(),
 };
 
 const guidList = z
@@ -603,6 +624,27 @@ export const authorizationConfigShape = {
     300,
     AUTHORIZATION_DEFAULTS.invalidationPollSeconds,
   ),
+};
+
+export const ADMIN_DEFAULTS = {
+  stateDir: '.ehub/admin-state',
+  retentionDays: 90,
+} as const;
+
+/*
+ * The administration area (phase 15, docs/admin.md): served by the answer API under /admin when
+ * enabled. Access is by Entra app role, checked on the server for every request.
+ */
+export const adminConfigShape = {
+  ADMIN_UI_ENABLED: booleanFlag(false),
+  /** Audit trail and usage events (answer outcomes, feedback). */
+  ADMIN_STATE_DIR: z.string().trim().min(1).max(500).default(ADMIN_DEFAULTS.stateDir),
+  /** Days audit records and usage events are kept. */
+  ADMIN_RETENTION_DAYS: boundedInteger(7, 730, ADMIN_DEFAULTS.retentionDays),
+  /** The admin page's single-page-app registration (MSAL sign-in). */
+  ADMIN_SPA_CLIENT_ID: guid('ADMIN_SPA_CLIENT_ID').optional(),
+  /** The origin browsers use for the API, e.g. https://ehub-api.example.com (CSRF origin check). */
+  ADMIN_PUBLIC_ORIGIN: serviceUrl({ httpsOnly: false }).optional(),
 };
 
 export const TEAMS_DEFAULTS = {
@@ -748,6 +790,7 @@ export const authorizationConfigSchema = defineConfigSchema(authorizationConfigS
     }
   },
 );
+export const adminConfigSchema = defineConfigSchema(adminConfigShape);
 export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
 export const chatConfigSchema = defineConfigSchema(chatConfigShape);
 export const syncConfigSchema = defineConfigSchema(syncConfigShape).superRefine((config, ctx) => {
@@ -814,6 +857,7 @@ export const applicationConfigSchema = defineConfigSchema({
   ...syncConfigShape,
   ...apiServerConfigShape,
   ...authorizationConfigShape,
+  ...adminConfigShape,
   ENTRA_ALLOWED_TENANT_IDS: entraAuthConfigShape.ENTRA_ALLOWED_TENANT_IDS,
   ENTRA_API_CLIENT_ID: entraAuthConfigShape.ENTRA_API_CLIENT_ID.optional(),
   ENTRA_API_APP_ID_URI: entraAuthConfigShape.ENTRA_API_APP_ID_URI,
@@ -847,6 +891,7 @@ export type TeamsConfig = z.output<typeof teamsConfigSchema>;
 export type TeamsManifestConfig = z.output<typeof teamsManifestConfigSchema>;
 export type EntraAuthConfig = z.output<typeof entraAuthConfigSchema>;
 export type AuthorizationConfig = z.output<typeof authorizationConfigSchema>;
+export type AdminConfig = z.output<typeof adminConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -869,6 +914,7 @@ export const CONFIG_FEATURES = {
   teamsManifest: teamsManifestConfigSchema,
   entraAuth: entraAuthConfigSchema,
   authorization: authorizationConfigSchema,
+  admin: adminConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -892,5 +938,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   teamsManifest: Object.keys(teamsManifestConfigShape),
   entraAuth: Object.keys(entraAuthConfigShape),
   authorization: Object.keys(authorizationConfigShape),
+  admin: Object.keys(adminConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

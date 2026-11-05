@@ -14,6 +14,9 @@
     },
     {
       "path": "../../packages/moodle-client/tsconfig.build.json"
+    },
+    {
+      "path": "../indexer/tsconfig.build.json"
     }
   ]
 }

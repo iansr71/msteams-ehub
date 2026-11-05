@@ -26,3 +26,20 @@ export * from './pipeline/chunkingSettings.js';
 export * from './pipeline/chunkMetadata.js';
 export * from './pipeline/normalizeContent.js';
 export * from './pipeline/tokenCounter.js';
+export * from './commands/syncServices.js';
+export * from './jobs/syncContext.js';
+export * from './jobs/syncJobs.js';
+export * from './jobs/syncReport.js';
+export * from './state/fileSyncStateRepository.js';
+export * from './state/inMemorySyncStateRepository.js';
+export * from './state/syncState.js';
+export {
+  SyncStateConflictError,
+  SyncStateCorruptError,
+  isSyncStateConflict,
+  systemClock as systemSyncClock,
+  type Clock as SyncClock,
+  type LeaseRequest,
+  type ResourceStateQuery,
+  type SyncStateRepository,
+} from './state/syncStateRepository.js';

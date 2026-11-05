@@ -10,7 +10,7 @@ export interface FeedbackEvent {
   readonly receivedAt: string;
 }
 
-/** Where answer feedback goes; persisted storage and reporting arrive with phase 15. */
+/** Where answer feedback goes: logged, and stored for the administration dashboard when enabled. */
 export interface FeedbackRecorder {
   record(event: FeedbackEvent): Promise<void>;
 }

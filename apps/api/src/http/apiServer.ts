@@ -48,6 +48,20 @@ export interface ApiServerOptions {
   readonly service: string;
   readonly version: string;
   readonly clock?: () => Date;
+  /** The administration area under /admin (docs/admin.md), when enabled. */
+  readonly admin?: (
+    request: IncomingMessage,
+    response: ServerResponse,
+    correlationId: string,
+  ) => Promise<void>;
+  /** Records each answer's outcome (status only) for the administration dashboard. */
+  readonly answerOutcomes?: {
+    record(outcome: {
+      readonly at: string;
+      readonly status: 'answered' | 'insufficient_evidence' | 'failed';
+      readonly correlationId: string;
+    }): Promise<void>;
+  };
 }
 
 /** Questions are short; anything larger is refused before parsing. */
@@ -253,7 +267,13 @@ export function createApiRequestHandler(
       },
       { signal },
     );
-    send(response, 200, toAnswerResponse(answer, correlationId, caller.mock), correlationId);
+    const answerBody = toAnswerResponse(answer, correlationId, caller.mock);
+    await options.answerOutcomes?.record({
+      at: clock().toISOString(),
+      status: answerBody.status,
+      correlationId,
+    });
+    send(response, 200, answerBody, correlationId);
   };
 
   const feedback = async (
@@ -281,7 +301,10 @@ export function createApiRequestHandler(
       const method = request.method ?? 'GET';
       let outcome = 'ok';
       try {
-        if (path === ANSWER_API_PATHS.health) {
+        if (options.admin !== undefined && (path === '/admin' || path.startsWith('/admin/'))) {
+          await options.admin(request, response, correlationId);
+          outcome = `admin:${String(response.statusCode)}`;
+        } else if (path === ANSWER_API_PATHS.health) {
           if (method !== 'GET') {
             throw new HttpRequestError('method_not_allowed');
           }

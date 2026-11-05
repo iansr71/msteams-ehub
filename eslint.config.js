@@ -46,6 +46,11 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
+    // The administration page runs in the browser, with MSAL loaded as a global script.
+    files: ['apps/api/admin-ui/**/*.js'],
+    languageOptions: { globals: { ...globals.browser, msal: 'readonly' } },
+  },
+  {
     files: ['**/*.test.ts'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

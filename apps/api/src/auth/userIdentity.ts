@@ -43,12 +43,16 @@ export type UserIdentity = z.output<typeof userIdentitySchema>;
 /** The development mock user's fixed object ID (not a real directory object). */
 export const MOCK_OBJECT_ID = '00000000-0000-4000-8000-00000000d0d0';
 
-export function mockIdentity(tenantId: string, label: string): UserIdentity {
+export function mockIdentity(
+  tenantId: string,
+  label: string,
+  roles: readonly string[] = [],
+): UserIdentity {
   return userIdentitySchema.parse({
     tenantId,
     objectId: MOCK_OBJECT_ID,
     displayName: `Development mock user (${label})`,
-    roles: [],
+    roles: [...roles],
     authentication: { method: 'dev-mock', scopes: [] },
   });
 }

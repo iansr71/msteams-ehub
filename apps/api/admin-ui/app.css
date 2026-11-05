@@ -1,0 +1,217 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1b1b1f;
+  --bg: #ffffff;
+  --muted: #5c5c66;
+  --line: #d4d4dc;
+  --accent: #5b3f8c;
+  --accent-fg: #ffffff;
+  --danger: #a4262c;
+  --ok: #107c10;
+  --warn-bg: #fff4ce;
+  --error-bg: #fde7e9;
+  font-family:
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  line-height: 1.5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f3f3f5;
+    --bg: #1f1f23;
+    --muted: #b3b3bd;
+    --line: #44444c;
+    --accent: #b9a3e3;
+    --accent-fg: #1f1f23;
+    --danger: #ff99a4;
+    --ok: #6ccb5f;
+    --warn-bg: #433519;
+    --error-bg: #442726;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: var(--fg);
+  background: var(--bg);
+}
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+  background: var(--bg);
+  padding: 0.5rem;
+  z-index: 10;
+}
+.banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.product {
+  margin: 0;
+  font-weight: 600;
+}
+.mode-banner {
+  padding: 0.5rem 1rem;
+  background: var(--warn-bg);
+}
+nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+nav a {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.25rem;
+  color: var(--fg);
+}
+nav a[aria-current='page'] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+main {
+  padding: 1rem;
+  max-width: 80rem;
+}
+.status:not(:empty) {
+  margin: 0.75rem 1rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid var(--ok);
+}
+.error {
+  margin: 0.75rem 1rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid var(--danger);
+  background: var(--error-bg);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+}
+.cards > div {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+.cards dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.cards dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.5rem 0;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+th {
+  font-weight: 600;
+}
+button {
+  font: inherit;
+  padding: 0.35rem 0.8rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+button.secondary {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--line);
+}
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg);
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+form.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.95rem;
+}
+input {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  background: var(--bg);
+  color: var(--fg);
+}
+.muted {
+  color: var(--muted);
+}
+dialog {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  color: var(--fg);
+  background: var(--bg);
+  max-width: 32rem;
+}
+dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.badge {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  font-size: 0.85rem;
+}

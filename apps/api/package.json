@@ -12,12 +12,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "admin-ui"
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "clean": "node ../../scripts/clean.mjs dist tsconfig.build.tsbuildinfo",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p admin-ui/tsconfig.json",
     "cli": "tsx --conditions=@ehub/source src/cli.ts",
     "start": "node dist/cli.js",
     "evaluation": "tsx --conditions=@ehub/source src/evaluationCli.ts",
@@ -31,6 +32,8 @@
     "ehub-authorization": "./dist/authorizationCli.js"
   },
   "dependencies": {
+    "@azure/msal-browser": "5.25.1",
+    "@ehub/indexer": "workspace:*",
     "@ehub/moodle-client": "workspace:*",
     "@ehub/shared": "workspace:*",
     "jose": "6.2.12",

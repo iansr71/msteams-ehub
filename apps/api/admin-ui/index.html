@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>E-Hub Assistant administration</title>
+    <link rel="stylesheet" href="/admin/app.css" />
+    <script src="/admin/vendor/msal-browser.min.js" defer></script>
+    <script type="module" src="/admin/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="banner">
+      <p class="product">E-Hub Assistant administration</p>
+      <div id="account" class="account" aria-live="polite"></div>
+    </header>
+    <div id="mode-banner" class="mode-banner" hidden></div>
+    <nav aria-label="Administration sections">
+      <ul id="nav"></ul>
+    </nav>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <main id="main" tabindex="-1">
+      <h1 id="page-title" tabindex="-1">Loading…</h1>
+      <div id="page"></div>
+    </main>
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <form method="dialog">
+        <h2 id="confirm-title">Confirm</h2>
+        <p id="confirm-text"></p>
+        <div class="dialog-actions">
+          <button type="submit" value="cancel" class="secondary">Cancel</button>
+          <button type="submit" value="confirm" id="confirm-ok" class="danger">Confirm</button>
+        </div>
+      </form>
+    </dialog>
+    <noscript>The administration area needs JavaScript.</noscript>
+  </body>
+</html>

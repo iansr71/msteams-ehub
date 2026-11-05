@@ -66,8 +66,8 @@ so a staff member's screenshot leads straight to the logs.
 Buttons are Adaptive Card Universal Actions (`Action.Execute`, with an `Action.Submit` fallback
 for older clients). The bot answers the button with a short confirmation and forwards
 `{answerId, rating}` to `POST /v1/feedback`. The API logs one structured event per rating with a
-pseudonymous user key (a hash), never the question or answer. Storage and reporting arrive with
-the administration UI (phase 15).
+pseudonymous user key (a hash), never the question or answer. With the administration area
+enabled, ratings are also stored and summarised on its dashboard ([admin.md](admin.md)).
 
 ## Identity
 
@@ -270,8 +270,8 @@ identity is configured). It is unauthenticated and reveals no configuration valu
 - **Guest users.** Branch staff use Teams as guests on personal email addresses. Whether guests
   can install the app and complete SSO has not been verified in the tenant; see
   [entra-sso.md](entra-sso.md#guest-users).
-- Feedback is logged, not stored or reported (phase 15). Any authenticated caller can rate any
-  answer ID; ratings carry no content, so the risk is noise, not disclosure.
+- Any authenticated caller can rate any answer ID, and more than once; ratings carry no content,
+  so the risk is skewed counts, not disclosure.
 - The bot's in-memory state (duplicate detection, in-flight count) is per process; running
   several instances needs shared state (phase 19).
 - Questions in flight when the bot stops are lost; the user sees no answer and can ask again.

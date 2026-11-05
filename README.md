@@ -11,6 +11,7 @@ user's Moodle course enrolments.
 > HTTP answer API (`pnpm api serve`) and the Teams personal app (docs/teams-app.md). Users sign
 > in with Microsoft Entra ID single sign-on (docs/entra-sso.md) and can ask only about the Moodle
 > courses they are enrolled in (docs/authorization.md, `pnpm identity …`, `pnpm authorization …`).
+> Administrators use `/admin` on the API (docs/admin.md), by Entra app role.
 
 ## Repository layout
 

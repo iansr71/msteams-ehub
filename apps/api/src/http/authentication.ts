@@ -105,12 +105,14 @@ export class DevMockAuthenticator implements RequestAuthenticator {
     readonly nodeEnv: string;
     readonly userId: string;
     readonly tenantId: string;
+    /** App roles to give the mock user (admin area testing). */
+    readonly roles?: readonly string[];
   }) {
     if (options.nodeEnv !== 'development') {
       throw new MockIdentityNotAllowedError();
     }
     this.#userId = options.userId;
-    this.#identity = mockIdentity(options.tenantId, options.userId);
+    this.#identity = mockIdentity(options.tenantId, options.userId, options.roles ?? []);
   }
 
   authenticate(headers: RequestHeaders): Promise<AuthenticationResult> {
@@ -154,6 +156,7 @@ export interface AuthenticatorSettings {
   readonly entra?: EntraTokenValidator;
   readonly mockIdentity: boolean;
   readonly mockUserId: string;
+  readonly mockRoles?: readonly string[];
 }
 
 /**
@@ -171,6 +174,7 @@ export function createAuthenticator(
         nodeEnv: settings.nodeEnv,
         userId: settings.mockUserId,
         tenantId: settings.tenantId,
+        ...(settings.mockRoles === undefined ? {} : { roles: settings.mockRoles }),
       });
     } else {
       logger.warn(

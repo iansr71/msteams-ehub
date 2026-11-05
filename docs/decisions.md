@@ -248,3 +248,27 @@ The blanket production refusals in the API, the bot and `teams:package` existed 
 was no real identity (phase 13) and no course authorisation (phase 14). They are replaced by
 checks that production has Entra sign-in and Moodle authorisation (API) and bot credentials and
 SSO (bot). Security hardening (phase 17) and the Azure deployment (phase 19) are still to come.
+
+## Administration inside the answer API, signed in with MSAL and bearer tokens (phase 15)
+
+The administration area is a static page and a JSON API under `/admin` in the answer API, not a
+separate app: it reuses the API's Entra validation, identity store and authorisation cache, and
+there is no second service to deploy and secure. The page signs in through its own SPA
+registration with MSAL and calls the API with bearer tokens. With no session cookie there is no
+cookie-based CSRF to defend; a server-side session would have needed a confidential client, a
+session store and CSRF tokens for no gain. Manual sync jobs run in the API process, one at a
+time, guarded by the same course leases as the scheduled indexer, because there is no job queue
+yet (phase 19 adds scheduled jobs in Azure).
+
+## Configuration is shown, not edited, in the administration area (phase 15)
+
+Settings come from the environment and Key Vault references. Editing them from a page would
+make the running configuration differ from the deployed one, need write access to secrets'
+neighbours, and bypass change control. The page shows an allow-list of non-secret values;
+changes go through the app settings.
+
+## No four-eyes approval for identity overrides (phase 15)
+
+An override is approved by one application administrator, with a confirmation, a Moodle check
+that the account is active, and an audit record. Two-person approval was considered and left
+out: Skin Renewal has one IT administrator, so it would block every override.

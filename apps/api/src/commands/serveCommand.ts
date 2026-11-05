@@ -1,6 +1,7 @@
 import {
   EXIT_FAILURE,
   EXIT_OK,
+  adminConfigSchema,
   apiServerConfigSchema,
   cleanEnvironment,
   entraAuthConfigSchema,
@@ -23,6 +24,8 @@ import {
   type AuthorizationMoodle,
 } from '../authorization/factory.js';
 import type { IdentityMappingRepository } from '../authorization/identityMappingRepository.js';
+import { AnswerOutcomeRecorder, StoringFeedbackRecorder } from '../admin/events.js';
+import { AdminSetupError, createAdminArea, type AdminDependencies } from '../admin/factory.js';
 import { EntraTokenValidator, entraSigningKeys } from '../auth/entraTokenValidator.js';
 import { createAuthenticator } from '../http/authentication.js';
 import { LoggingFeedbackRecorder, type FeedbackRecorder } from '../http/feedbackRecorder.js';
@@ -42,6 +45,8 @@ export interface ServeCommandDependencies extends AskCommandDependencies {
   readonly identityRepository?: IdentityMappingRepository;
   /** For tests: the HTTP transport of the real Moodle client. */
   readonly moodleFetch?: FetchFn;
+  /** For tests: administration area seams (sync state, stores, job runner). */
+  readonly admin?: Omit<AdminDependencies, 'env'>;
 }
 
 /** Entra validation is configured when the API's registration is named. */
@@ -121,6 +126,9 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
               tenantId,
               mockIdentity: config.API_DEV_MOCK_IDENTITY,
               mockUserId: config.API_DEV_MOCK_USER_ID,
+              ...(config.API_DEV_MOCK_ROLES === undefined
+                ? {}
+                : { mockRoles: config.API_DEV_MOCK_ROLES }),
               ...(entra === undefined
                 ? {}
                 : {
@@ -144,17 +152,31 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
             },
             context.logger,
           );
-          const courseAccess: CourseAccessResolver = moodleAuthorizationConfigured(
-            authorizationDependencies,
-          )
+          const authorization = moodleAuthorizationConfigured(authorizationDependencies)
             ? createAuthorizationServices(authorizationDependencies, context.logger, {
                 mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
-              }).courses
-            : new InterimCourseAccess({
-                nodeEnv: config.NODE_ENV,
-                mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
-                devEntraCourseIds: config.API_DEV_ENTRA_COURSE_IDS ?? [],
-              });
+              })
+            : undefined;
+          const courseAccess: CourseAccessResolver =
+            authorization?.courses ??
+            new InterimCourseAccess({
+              nodeEnv: config.NODE_ENV,
+              mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
+              devEntraCourseIds: config.API_DEV_ENTRA_COURSE_IDS ?? [],
+            });
+          const adminEnabled = loadConfig(adminConfigSchema, dependencies.env).ADMIN_UI_ENABLED;
+          const admin = adminEnabled
+            ? createAdminArea({
+                dependencies: { ...dependencies.admin, env: dependencies.env },
+                authenticator,
+                entra,
+                authorization,
+                mockUserId: config.API_DEV_MOCK_IDENTITY ? config.API_DEV_MOCK_USER_ID : undefined,
+                logger: context.logger,
+              })
+            : undefined;
+          const logFeedback =
+            dependencies.createFeedbackRecorder?.() ?? new LoggingFeedbackRecorder(context.logger);
           const server = await startApiServer(
             {
               answerer: rag,
@@ -162,8 +184,15 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
               courseAccess,
               ...(entra === undefined ? {} : { requiredScope: entra.ENTRA_API_SCOPE }),
               feedback:
-                dependencies.createFeedbackRecorder?.() ??
-                new LoggingFeedbackRecorder(context.logger),
+                admin === undefined
+                  ? logFeedback
+                  : new StoringFeedbackRecorder(admin.stores.usage, logFeedback),
+              ...(admin === undefined
+                ? {}
+                : {
+                    admin: admin.handler,
+                    answerOutcomes: new AnswerOutcomeRecorder(admin.stores.usage, context.logger),
+                  }),
               tenantId,
               requestTimeoutMs: config.API_REQUEST_TIMEOUT_MS,
               logger: context.logger,
@@ -178,6 +207,11 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
             courseAccess: courseAccess.mode,
           });
           const lines = [`Answer API listening on ${sanitizeText(server.url, 100)}`];
+          if (admin !== undefined) {
+            lines.push(
+              `  Administration: ${sanitizeText(server.url, 100)}/admin (${admin.clientMode === 'msal' ? 'Entra sign-in' : admin.clientMode === 'dev-mock' ? 'DEVELOPMENT MOCK IDENTITY' : 'sign-in not configured'})`,
+            );
+          }
           if (authenticator.mode.includes('entra')) {
             lines.push(
               `  Entra ID sign-in: tenant ${entra?.AZURE_TENANT_ID ?? ''}, scope ${entra?.ENTRA_API_SCOPE ?? ''}`,
@@ -201,10 +235,15 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
           context.stdout(lines.join('\n'));
           await (dependencies.waitForShutdown ?? defaultWaitForShutdown)(server);
           await server.close();
+          admin?.close();
+          await admin?.runner.idle();
           context.logger.info('Answer API stopped.');
           return EXIT_OK;
         },
-        describeAskFailure,
+        (error) =>
+          error instanceof AdminSetupError
+            ? { status: 'error', error: { category: 'configuration', message: error.message } }
+            : describeAskFailure(error),
       ),
   };
 }

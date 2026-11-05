@@ -47,6 +47,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@azure/msal-browser':
+        specifier: 5.25.1
+        version: 5.25.1
+      '@ehub/indexer':
+        specifier: workspace:*
+        version: link:../indexer
       '@ehub/moodle-client':
         specifier: workspace:*
         version: link:../../packages/moodle-client
@@ -190,6 +196,10 @@ packages:
     resolution: {integrity: sha512-rbAE25KUfjU/s3XHUdJgceoCP5dEOpMx85J04kF+QMdta73XkuG9JGHHinch+XIoKpBdqljin+KqURpJriSzLA==}
     engines: {node: '>=22.0.0'}
 
+  '@azure/msal-browser@5.25.1':
+    resolution: {integrity: sha512-NDW2/bz2Pz71EJAlhSw+jg1kpRIWtrzj0gCzcHuG1u7iLvSOHpUc5lICkDA9x0bbeityxTneiunSBluvS+/y4w==}
+    engines: {node: '>=0.8.0'}
+
   '@azure/msal-browser@5.27.0':
     resolution: {integrity: sha512-i2CKKyuCuOZEBZJiAoFK/viYZAP6CRaqqlkeHl3ViteDHOUE/tkI/Slq1cdGnwhkIB+k1OE0g00QGl9O0gAFNQ==}
     engines: {node: '>=0.8.0'}
@@ -200,6 +210,10 @@ packages:
 
   '@azure/msal-common@16.14.1':
     resolution: {integrity: sha512-Or6xhPNyi4zHW25158yxBoyxuCqNSPa5YBVqfF1J5Ks4MJWBo/USXdp05DQIPu1Zli00YZu6t0+h6KvHJealxQ==}
+    engines: {node: '>=0.8.0'}
+
+  '@azure/msal-common@16.14.2':
+    resolution: {integrity: sha512-HOBR0Gfo39TMrkxNG8k6cfjRkrRjXZc3JQs3ebMWQc9S4cihuknMYra3sgmzbZB752oQBqBN9+WF7c826p2vIQ==}
     engines: {node: '>=0.8.0'}
 
   '@azure/msal-common@16.15.0':
@@ -1869,6 +1883,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@azure/msal-browser@5.25.1':
+    dependencies:
+      '@azure/msal-common': 16.14.2
+
   '@azure/msal-browser@5.27.0':
     dependencies:
       '@azure/msal-common': 16.15.0
@@ -1876,6 +1894,8 @@ snapshots:
   '@azure/msal-common@16.13.0': {}
 
   '@azure/msal-common@16.14.1': {}
+
+  '@azure/msal-common@16.14.2': {}
 
   '@azure/msal-common@16.15.0': {}
 
