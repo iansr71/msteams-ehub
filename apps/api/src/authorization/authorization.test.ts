@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { InMemoryTelemetry, resetTelemetry, setTelemetry } from '@ehub/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -686,5 +687,37 @@ describe('file identity store', () => {
     });
     clock += 2 * 60 * 60_000 + 1;
     expect(await repository.listInvalidations()).toEqual([]);
+  });
+});
+
+describe('identity and authorisation telemetry', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('counts mappings by status, method and reason, never by email or object ID', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const moodle = new FakeMoodle();
+    moodle.users = [moodleUser(8, { email: 'thandi@example.test' })];
+    const { resolver } = resolverWith(moodle);
+    await resolver.resolve(claims(USER_A, { email: 'thandi@example.test' }));
+    await resolver.resolve(claims(USER_B, { email: 'nobody@example.test' }));
+    expect(memory.find('ehub.identity.mappings').map((entry) => entry.dimensions)).toEqual([
+      { status: 'mapped', method: 'email' },
+      expect.objectContaining({ status: 'denied' }),
+    ]);
+    expect(memory.spans.map((span) => [span.name, span.attributes['ehub.outcome']])).toEqual([
+      ['identity.resolve', 'mapped'],
+      ['identity.resolve', 'denied'],
+    ]);
+    const text = JSON.stringify({
+      spans: memory.spans.map((span) => span.attributes),
+      metrics: memory.metrics,
+    });
+    for (const value of ['thandi', 'nobody', 'example.test', USER_A, USER_B]) {
+      expect(text).not.toContain(value);
+    }
+    expect(memory.dropped).toBe(0);
   });
 });

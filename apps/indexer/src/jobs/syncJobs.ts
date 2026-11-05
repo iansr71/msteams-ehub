@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { getCorrelationId } from '@ehub/shared';
+import { getCorrelationId, getTelemetry } from '@ehub/shared';
 
 import type { StoredResourceState, SyncJobRecord, SyncJobType } from '../state/syncState.js';
 import { classifyError } from './failureClassification.js';
@@ -15,6 +15,7 @@ import {
   type SyncJob,
   type SyncServices,
 } from './syncContext.js';
+import { reportSyncGauges } from './syncMetrics.js';
 import { SyncReportBuilder, type SyncReport } from './syncReport.js';
 import { removeResource, syncListedResource, syncSingleResource } from './syncResource.js';
 import { CourseNotFoundError, ResourceNotFoundError } from '../moodle/inspectCourse.js';
@@ -32,6 +33,43 @@ export interface RunOptions extends Partial<JobOptions> {
  * Selection errors and unknown resource IDs are rethrown; everything else ends in a report.
  */
 async function runJob(
+  services: SyncServices,
+  jobType: SyncJobType,
+  runOptions: RunOptions,
+  body: (job: SyncJob) => Promise<void>,
+): Promise<SyncReport> {
+  return await getTelemetry().span(
+    'sync.job',
+    async (span) => {
+      const report = await runJobBody(services, jobType, runOptions, body);
+      span.set({
+        'ehub.job_id': report.jobId,
+        'ehub.status': report.status,
+        'ehub.count.courses': report.courses.length,
+      });
+      if (report.failureCategory !== undefined) {
+        span.fail(report.failureCategory);
+      }
+      if (!report.dryRun) {
+        getTelemetry().count('ehub.sync.jobs', {
+          job_type: jobType.replaceAll('-', '_'),
+          status: report.status,
+        });
+        try {
+          await reportSyncGauges(services.state, services.settings.tenantId, services.clock.now());
+        } catch (error) {
+          services.logger.warn('Sync gauges could not be reported.', {
+            errorType: error instanceof Error ? error.name : typeof error,
+          });
+        }
+      }
+      return report;
+    },
+    { attributes: { 'ehub.job_type': jobType.replaceAll('-', '_') } },
+  );
+}
+
+async function runJobBody(
   services: SyncServices,
   jobType: SyncJobType,
   runOptions: RunOptions,

@@ -2,6 +2,7 @@ import type { CommandDefinition, EnvironmentSource } from '@ehub/shared';
 
 import { createAnswerEvaluationCommand } from './answerEvaluationCommand.js';
 import { createAskCommand, type AskCommandDependencies } from './askCommand.js';
+import { createDiagnoseCommand, type DiagnoseDependencies } from './diagnoseCommand.js';
 import { createHealthCommand } from './health.js';
 import { createServeCommand, type ServeCommandDependencies } from './serveCommand.js';
 import {
@@ -15,6 +16,7 @@ export interface ApiCommandDependencies {
   readonly retrieval?: RetrievalCommandDependencies;
   readonly ask?: AskCommandDependencies;
   readonly serve?: ServeCommandDependencies;
+  readonly diagnose?: DiagnoseDependencies;
 }
 
 export function createApiCommands(
@@ -27,6 +29,7 @@ export function createApiCommands(
     retrieve: createRetrieveCommand(retrieval),
     ask: createAskCommand(dependencies.ask ?? retrieval),
     serve: createServeCommand(dependencies.serve ?? dependencies.ask ?? retrieval),
+    diagnose: createDiagnoseCommand(dependencies.diagnose ?? dependencies.ask ?? retrieval),
   };
 }
 

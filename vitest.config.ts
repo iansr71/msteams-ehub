@@ -1,7 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
 // Resolve workspace packages to their TypeScript source (see tsconfig.base.json customConditions).
-const sourceConditions = ['@ehub/source', 'node', 'import', 'module', 'default'];
+// No `module` condition: with it Vite picks @opentelemetry/api's ESM build, whose extensionless
+// imports Node cannot load. Node itself never uses that condition, so tests now resolve as
+// production does.
+const sourceConditions = ['@ehub/source', 'node', 'import', 'default'];
 
 const shared = {
   resolve: { conditions: sourceConditions },

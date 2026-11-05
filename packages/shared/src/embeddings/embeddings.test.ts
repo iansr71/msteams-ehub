@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLogger } from '../logging/logger.js';
 import { clearRegisteredSecretValues } from '../logging/redaction.js';
+import { InMemoryTelemetry, resetTelemetry, setTelemetry } from '../telemetry/telemetry.js';
 import { apiKeyAuthenticator, tokenCredentialAuthenticator } from '../search/auth.js';
 import { FakeEmbeddingService, fakeVector } from './__fixtures__/fakeEmbeddingService.js';
 import {
@@ -500,5 +501,37 @@ describe('createEmbeddingProvider', () => {
     });
     expect((await withIdentity.healthCheck()).status).toBe('healthy');
     expect(createCredential).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('embedding telemetry', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('records each batch as an embedding dependency without the input text', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const { provider } = setup();
+    const secret = 'Client Lerato reacted to the glycolic peel';
+    await provider.embedBatch([secret, 'second input']);
+    expect(memory.spans[0]).toMatchObject({
+      name: 'embedding.request',
+      kind: 'client',
+      attributes: {
+        'ehub.dependency': 'embedding',
+        'ehub.operation': 'embed',
+        'ehub.count.inputs': 2,
+      },
+    });
+    expect(
+      memory.find('ehub.dependency.duration', { dependency: 'embedding', outcome: 'success' }),
+    ).toHaveLength(1);
+    const text = JSON.stringify({
+      spans: memory.spans.map((span) => span.attributes),
+      metrics: memory.metrics,
+    });
+    expect(text).not.toContain('Lerato');
+    expect(text).not.toContain(API_KEY);
   });
 });

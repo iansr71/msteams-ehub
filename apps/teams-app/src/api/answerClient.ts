@@ -1,4 +1,4 @@
-import { CORRELATION_ID_HEADER, type Logger } from '@ehub/shared';
+import { CORRELATION_ID_HEADER, getTelemetry, type Logger } from '@ehub/shared';
 import {
   ANSWER_API_PATHS,
   MOCK_IDENTITY_HEADER,
@@ -138,21 +138,42 @@ export class HttpAnswerClient implements AnswerClient {
     const started = Date.now();
     let response: Response;
     try {
-      response = await this.#fetch(`${this.#baseUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-          [CORRELATION_ID_HEADER]: context.correlationId,
-          // The token is passed through unread; the API validates it.
-          ...(context.credential.kind === 'user-token'
-            ? { authorization: `Bearer ${context.credential.token}` }
-            : { [MOCK_IDENTITY_HEADER]: context.credential.userId }),
+      response = await getTelemetry().span(
+        'answer_api.request',
+        async (span) => {
+          // W3C trace context, so the API's spans join this trace (alongside the correlation ID).
+          const traceHeaders: Record<string, string> = {};
+          getTelemetry().inject(traceHeaders);
+          const result = await this.#fetch(`${this.#baseUrl}${path}`, {
+            method: 'POST',
+            headers: {
+              ...traceHeaders,
+              'content-type': 'application/json',
+              accept: 'application/json',
+              [CORRELATION_ID_HEADER]: context.correlationId,
+              // The token is passed through unread; the API validates it.
+              ...(context.credential.kind === 'user-token'
+                ? { authorization: `Bearer ${context.credential.token}` }
+                : { [MOCK_IDENTITY_HEADER]: context.credential.userId }),
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.any(signals),
+            redirect: 'error',
+          });
+          span.set({ 'http.response.status_code': result.status });
+          if (result.status >= 500) {
+            span.fail('server_error');
+          }
+          return result;
         },
-        body: JSON.stringify(body),
-        signal: AbortSignal.any(signals),
-        redirect: 'error',
-      });
+        {
+          kind: 'client',
+          attributes: {
+            'ehub.dependency': 'answer_api',
+            'ehub.operation': path === '/v1/answers' ? 'answers' : 'feedback',
+          },
+        },
+      );
     } catch (error) {
       const kind = isTimeout(error) ? 'timeout' : 'unavailable';
       this.#logger.warn('Answer API request failed.', {

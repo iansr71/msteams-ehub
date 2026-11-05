@@ -1,5 +1,5 @@
-import { createLogger } from '@ehub/shared';
-import { describe, expect, it } from 'vitest';
+import { InMemoryTelemetry, createLogger, resetTelemetry, setTelemetry } from '@ehub/shared';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { answer } from '../cards/__fixtures__/answers.js';
 import { AnswerClientError, HttpAnswerClient, type FetchLike } from './answerClient.js';
@@ -147,5 +147,24 @@ describe('HttpAnswerClient', () => {
       .ask({ question: 'Zebra-orchid?' }, { correlationId: 't', credential })
       .catch(() => undefined);
     expect(logs.join('\n')).not.toContain('Zebra-orchid');
+  });
+});
+
+describe('trace propagation', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('sends the W3C traceparent inside an answer_api.request client span', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const { instance, calls } = client(() => Promise.resolve(Response.json(answer())));
+    await instance.ask({ question: 'Q?' }, { correlationId: 'turn-9', credential });
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers['traceparent']).toBe('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01');
+    expect(memory.spans.map((span) => [span.name, span.kind])).toContainEqual([
+      'answer_api.request',
+      'client',
+    ]);
   });
 });

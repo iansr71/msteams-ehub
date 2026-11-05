@@ -4,7 +4,9 @@ import {
   createLogger,
   isLogLevelSetting,
   loadLocalEnvFile,
+  readPackageVersion,
   runWithNewCorrelationId,
+  startTelemetryFromEnv,
   stderrSink,
 } from '@ehub/shared';
 
@@ -19,6 +21,13 @@ const logger = createLogger({
   sink: stderrSink,
 });
 
+const telemetry = await startTelemetryFromEnv({
+  serviceName: SERVICE_NAME,
+  version: readPackageVersion(new URL('../package.json', import.meta.url)),
+  env: process.env,
+  logger,
+});
+
 await runWithNewCorrelationId(async () => {
   try {
     const server = await startTeamsServer({ env: process.env, logger });
@@ -26,9 +35,12 @@ await runWithNewCorrelationId(async () => {
       `E-Hub Knowledge Assistant bot listening on port ${String(server.port)} (identity: ${server.identityMode}).\n`,
     );
     const stop = (): void => {
-      void server.stop().then(() => {
-        logger.info('Teams app stopped.');
-      });
+      void server
+        .stop()
+        .then(() => telemetry.shutdown())
+        .then(() => {
+          logger.info('Teams app stopped.');
+        });
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);

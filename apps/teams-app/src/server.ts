@@ -15,7 +15,9 @@ import {
   ssoIdentityProvider,
   type IdentityProvider,
 } from './conversation/identity.js';
-import { NodeHttpAdapter } from './teams/httpAdapter.js';
+import { ANSWER_API_PATHS } from '@ehub/shared/answers';
+
+import { NodeHttpAdapter, type BotReadiness } from './teams/httpAdapter.js';
 import {
   createTeamsBot,
   oauthConnectionSso,
@@ -24,6 +26,8 @@ import {
 } from './teams/teamsAdapter.js';
 
 export const SERVICE_NAME = 'ehub-teams-app';
+
+const READINESS_CACHE_MS = 15_000;
 
 export const PRODUCTION_REQUIREMENTS_MESSAGE =
   'In production the Teams app needs its bot registration (TEAMS_BOT_CLIENT_ID) and single sign-on (TEAMS_SSO_CONNECTION_NAME): see docs/entra-sso.md.';
@@ -137,8 +141,45 @@ export async function startTeamsServer(
     maxConcurrentQuestions: config.TEAMS_MAX_CONCURRENT_QUESTIONS,
   });
   const version = readPackageVersion(new URL('../package.json', import.meta.url));
+  const apiBaseUrl = config.TEAMS_API_BASE_URL ?? TEAMS_DEFAULTS.apiBaseUrl;
+  const probeFetch = dependencies.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
+  let lastReadiness: { readonly at: number; readonly value: BotReadiness } | undefined;
+  const ready = async (): Promise<BotReadiness> => {
+    if (lastReadiness !== undefined && Date.now() - lastReadiness.at < READINESS_CACHE_MS) {
+      return lastReadiness.value;
+    }
+    const started = performance.now();
+    let up = false;
+    let category: string | null;
+    try {
+      const response = await probeFetch(`${apiBaseUrl}${ANSWER_API_PATHS.live}`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3_000),
+        redirect: 'error',
+      });
+      up = response.ok;
+      category = up ? null : `http_${String(response.status)}`;
+    } catch (error) {
+      category =
+        error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'unreachable';
+    }
+    const value: BotReadiness = {
+      status: up && identity.mode !== 'none' ? 'ready' : 'not_ready',
+      dependencies: [
+        {
+          name: 'answer_api',
+          status: up ? 'up' : 'down',
+          latencyMs: Math.round(performance.now() - started),
+          category,
+        },
+      ],
+    };
+    lastReadiness = { at: Date.now(), value };
+    return value;
+  };
   const http = new NodeHttpAdapter({
     logger,
+    ready,
     ...(dependencies.host === undefined ? {} : { host: dependencies.host }),
     health: () => ({
       status: identity.mode === 'none' ? 'degraded' : 'ok',

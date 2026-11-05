@@ -1,5 +1,5 @@
-import { createLogger } from '@ehub/shared';
-import { describe, expect, it } from 'vitest';
+import { InMemoryTelemetry, createLogger, resetTelemetry, setTelemetry } from '@ehub/shared';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { SECRET_SENTENCE, TENANT_ID, seededSearch } from '../retrieval/__fixtures__/corpus.js';
 import type { RetrievedChunk } from '../retrieval/retrievalResultMapper.js';
@@ -487,5 +487,69 @@ describe('RagService: limits and logging', () => {
     );
     expect(neutralizeTags('line one\nline two\u0007')).toBe('line one\nline two ');
     expect(estimateTokens('abcdef')).toBe(2);
+  });
+});
+
+describe('RagService: citation validation telemetry', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('counts removed claims and refused answers by reason, without claim text', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const partial = await setup({
+      steps: [
+        modelAnswer({
+          claims: [
+            {
+              text: 'Sunscreen should be reapplied every two hours after a peel.',
+              sourceIds: ['S1'],
+            },
+            { text: 'Invented claim about Zebra serum.', sourceIds: ['S9'] },
+          ],
+        }),
+      ],
+    });
+    expect((await partial.rag.ask({ question: QUESTION, user })).removedClaims).toBe(1);
+    expect(memory.sum('ehub.citation_validation.failures', { reason: 'claim_removed' })).toBe(1);
+    expect(memory.find('ehub.citation_validation.failures', { reason: 'answer_refused' })).toEqual(
+      [],
+    );
+
+    const refused = await setup({
+      steps: [
+        modelAnswer({ claims: [{ text: 'Invented claim about Zebra serum.', sourceIds: ['S9'] }] }),
+      ],
+    });
+    expect((await refused.rag.ask({ question: QUESTION, user })).status).toBe(
+      'insufficient_evidence',
+    );
+    expect(memory.sum('ehub.citation_validation.failures', { reason: 'answer_refused' })).toBe(1);
+    const spans = memory.spans.filter((span) => span.name === 'citation.validate');
+    expect(spans.map((span) => [span.status, span.failureCategory])).toEqual([
+      ['ok', undefined],
+      ['error', 'answer_refused'],
+    ]);
+    expect(spans[0]?.attributes).toMatchObject({
+      'ehub.count.removed_claims': 1,
+      'ehub.count.citations': 1,
+    });
+    const text = JSON.stringify({
+      spans: memory.spans.map((span) => span.attributes),
+      metrics: memory.metrics,
+    });
+    expect(text).not.toContain('Zebra');
+    expect(text).not.toContain(QUESTION);
+  });
+
+  it('records nothing as a citation failure for an honest insufficient-evidence answer', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const { rag } = await setup({
+      steps: [modelAnswer({ answer: 'Unknown.', claims: [], insufficientEvidence: true })],
+    });
+    await rag.ask({ question: QUESTION, user });
+    expect(memory.find('ehub.citation_validation.failures')).toEqual([]);
   });
 });

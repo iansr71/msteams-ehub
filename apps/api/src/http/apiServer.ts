@@ -6,6 +6,8 @@ import {
   normalizeCorrelationId,
   runWithCorrelationId,
   type Logger,
+  getTelemetry,
+  statusClass,
 } from '@ehub/shared';
 import {
   ANSWER_API_PATHS,
@@ -26,6 +28,7 @@ import {
 } from '../rag/ragService.js';
 import { toAnswerResponse } from './answerDto.js';
 import type { CourseAccessResolver } from '../auth/courseAccess.js';
+import type { ReadinessReport } from '../health/readiness.js';
 import { AuthorizationUnavailableError, IdentityNotMappedError } from '../authorization/errors.js';
 import type { AuthenticatedCaller, RequestAuthenticator } from './authentication.js';
 import type { FeedbackRecorder } from './feedbackRecorder.js';
@@ -54,6 +57,8 @@ export interface ApiServerOptions {
     response: ServerResponse,
     correlationId: string,
   ) => Promise<void>;
+  /** Dependency checks behind /health/ready; without it readiness only reflects this process. */
+  readonly readiness?: { report(): Promise<ReadinessReport> };
   /** Records each answer's outcome (status only) for the administration dashboard. */
   readonly answerOutcomes?: {
     record(outcome: {
@@ -268,6 +273,7 @@ export function createApiRequestHandler(
       { signal },
     );
     const answerBody = toAnswerResponse(answer, correlationId, caller.mock);
+    getTelemetry().count('ehub.answers', { status: answerBody.status });
     await options.answerOutcomes?.record({
       at: clock().toISOString(),
       status: answerBody.status,
@@ -295,80 +301,159 @@ export function createApiRequestHandler(
   return (request, response) => {
     const header = request.headers[CORRELATION_ID_HEADER];
     const correlationId = normalizeCorrelationId(typeof header === 'string' ? header : undefined);
-    return runWithCorrelationId(correlationId, async () => {
-      const started = Date.now();
-      const path = new URL(request.url ?? '/', 'http://localhost').pathname;
-      const method = request.method ?? 'GET';
-      let outcome = 'ok';
-      try {
-        if (options.admin !== undefined && (path === '/admin' || path.startsWith('/admin/'))) {
-          await options.admin(request, response, correlationId);
-          outcome = `admin:${String(response.statusCode)}`;
-        } else if (path === ANSWER_API_PATHS.health) {
-          if (method !== 'GET') {
-            throw new HttpRequestError('method_not_allowed');
-          }
-          const health: ApiHealthResponse = {
-            status: options.authenticator.mode === 'none' ? 'degraded' : 'ok',
-            service: options.service,
-            version: options.version,
-            identityMode: options.authenticator.mode,
-          };
-          send(response, 200, health, correlationId);
-        } else if (path === ANSWER_API_PATHS.answers || path === ANSWER_API_PATHS.feedback) {
-          if (method !== 'POST') {
-            throw new HttpRequestError('method_not_allowed');
-          }
-          await (path === ANSWER_API_PATHS.answers ? answers : feedback)(
-            request,
-            response,
-            correlationId,
-          );
-        } else {
-          throw new HttpRequestError('not_found');
-        }
-      } catch (error) {
-        let code: ApiErrorCode;
-        let retryAfterMs: number | undefined;
-        if (error instanceof HttpRequestError) {
-          code = error.code;
-          if (error.challenge !== undefined && !response.headersSent) {
-            response.setHeader('www-authenticate', error.challenge);
-          }
-        } else if (error instanceof QuestionValidationError) {
-          code = 'invalid_question';
-        } else if (error instanceof RagAuthorizationError) {
-          code = error.code === 'invalid_user_context' ? 'unauthenticated' : error.code;
-        } else if (error instanceof IdentityNotMappedError) {
-          code = 'identity_not_mapped';
-        } else if (error instanceof AuthorizationUnavailableError) {
-          code = 'authorization_unavailable';
-        } else if (error instanceof RagRateLimitError) {
-          code = 'rate_limited';
-          retryAfterMs = error.retryAfterMs;
-        } else if (isAbort(error)) {
-          code = 'timeout';
-        } else {
-          code = 'internal_error';
-          logger.error('Request failed.', { err: error });
-        }
-        outcome = code;
-        if (!response.headersSent) {
-          sendError(response, code, correlationId, retryAfterMs);
-        }
-        // The body may be unread (e.g. too large); drain it so the connection can be reused.
-        request.resume();
-      }
-      // Method, path and outcome only: never bodies or headers.
-      logger.info('Request handled.', {
-        method,
-        path,
-        status: response.statusCode,
-        outcome,
-        durationMs: Date.now() - started,
-      });
-    });
+    const telemetry = getTelemetry();
+    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    const method = request.method ?? 'GET';
+    return runWithCorrelationId(correlationId, () =>
+      // Continues the caller's trace (W3C traceparent from the Teams bot) when there is one.
+      telemetry.withRemoteParent(request.headers, () =>
+        telemetry.span(
+          'api.request',
+          async (span) => {
+            const started = Date.now();
+            let outcome = 'ok';
+            try {
+              if (
+                options.admin !== undefined &&
+                (path === '/admin' || path.startsWith('/admin/'))
+              ) {
+                await options.admin(request, response, correlationId);
+                outcome = `admin:${String(response.statusCode)}`;
+              } else if (path === ANSWER_API_PATHS.live) {
+                if (method !== 'GET') {
+                  throw new HttpRequestError('method_not_allowed');
+                }
+                // Liveness: this process answers. Never depends on Moodle or Azure.
+                send(response, 200, { status: 'live' }, correlationId);
+              } else if (path === ANSWER_API_PATHS.ready) {
+                if (method !== 'GET') {
+                  throw new HttpRequestError('method_not_allowed');
+                }
+                const report: ReadinessReport =
+                  options.readiness === undefined
+                    ? { status: 'ready', checkedAt: clock().toISOString(), dependencies: [] }
+                    : await options.readiness.report();
+                const ready = report.status === 'ready' && options.authenticator.mode !== 'none';
+                send(
+                  response,
+                  ready ? 200 : 503,
+                  {
+                    ...report,
+                    status: ready ? 'ready' : 'not_ready',
+                    identityConfigured: options.authenticator.mode !== 'none',
+                  },
+                  correlationId,
+                );
+              } else if (path === ANSWER_API_PATHS.health) {
+                if (method !== 'GET') {
+                  throw new HttpRequestError('method_not_allowed');
+                }
+                const health: ApiHealthResponse = {
+                  status: options.authenticator.mode === 'none' ? 'degraded' : 'ok',
+                  service: options.service,
+                  version: options.version,
+                  identityMode: options.authenticator.mode,
+                };
+                send(response, 200, health, correlationId);
+              } else if (path === ANSWER_API_PATHS.answers || path === ANSWER_API_PATHS.feedback) {
+                if (method !== 'POST') {
+                  throw new HttpRequestError('method_not_allowed');
+                }
+                await (path === ANSWER_API_PATHS.answers ? answers : feedback)(
+                  request,
+                  response,
+                  correlationId,
+                );
+              } else {
+                throw new HttpRequestError('not_found');
+              }
+            } catch (error) {
+              let code: ApiErrorCode;
+              let retryAfterMs: number | undefined;
+              if (error instanceof HttpRequestError) {
+                code = error.code;
+                if (error.challenge !== undefined && !response.headersSent) {
+                  response.setHeader('www-authenticate', error.challenge);
+                }
+              } else if (error instanceof QuestionValidationError) {
+                code = 'invalid_question';
+              } else if (error instanceof RagAuthorizationError) {
+                code = error.code === 'invalid_user_context' ? 'unauthenticated' : error.code;
+              } else if (error instanceof IdentityNotMappedError) {
+                code = 'identity_not_mapped';
+              } else if (error instanceof AuthorizationUnavailableError) {
+                code = 'authorization_unavailable';
+              } else if (error instanceof RagRateLimitError) {
+                code = 'rate_limited';
+                retryAfterMs = error.retryAfterMs;
+              } else if (isAbort(error)) {
+                code = 'timeout';
+              } else {
+                code = 'internal_error';
+                logger.error('Request failed.', { err: error });
+              }
+              outcome = code;
+              if (!response.headersSent) {
+                sendError(response, code, correlationId, retryAfterMs);
+              }
+              // The body may be unread (e.g. too large); drain it so the connection can be reused.
+              request.resume();
+            }
+            // Method, path and outcome only: never bodies or headers.
+            logger.info('Request handled.', {
+              method,
+              path,
+              status: response.statusCode,
+              outcome,
+              durationMs: Date.now() - started,
+            });
+            const route = routeOf(path);
+            span.set({ 'ehub.route': route, 'http.response.status_code': response.statusCode });
+            if (response.statusCode >= 500) {
+              span.fail(DENIAL_CODES.has(outcome) || outcome === 'ok' ? 'server_error' : outcome);
+            }
+            telemetry.duration('ehub.http.server.duration', Date.now() - started, {
+              service: 'api',
+              route,
+              status_class: statusClass(response.statusCode),
+            });
+            if (DENIAL_CODES.has(outcome)) {
+              telemetry.count('ehub.access.denials', { kind: outcome });
+            }
+            if (outcome === 'rate_limited') {
+              telemetry.count('ehub.rate_limit.events', { dependency: 'answer_api' });
+            }
+          },
+          { kind: 'server', attributes: { 'ehub.service': 'api', 'http.request.method': method } },
+        ),
+      ),
+    );
   };
+}
+
+/** Refusals counted as access denials (authentication, course access, identity mapping). */
+const DENIAL_CODES: ReadonlySet<string> = new Set([
+  'unauthenticated',
+  'forbidden',
+  'no_authorized_courses',
+  'course_not_authorized',
+  'identity_not_mapped',
+]);
+
+function routeOf(path: string): string {
+  if (path === ANSWER_API_PATHS.health || path.startsWith('/health/')) {
+    return 'health';
+  }
+  if (path === ANSWER_API_PATHS.answers) {
+    return 'answers';
+  }
+  if (path === ANSWER_API_PATHS.feedback) {
+    return 'feedback';
+  }
+  if (path.startsWith('/admin/api/')) {
+    return 'admin_api';
+  }
+  return path === '/admin' || path.startsWith('/admin/') ? 'admin_page' : 'other';
 }
 
 export interface RunningApiServer {

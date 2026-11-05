@@ -7,6 +7,8 @@ import { z } from 'zod';
 
 export const ANSWER_API_PATHS = {
   health: '/health',
+  live: '/health/live',
+  ready: '/health/ready',
   answers: '/v1/answers',
   feedback: '/v1/feedback',
 } as const;

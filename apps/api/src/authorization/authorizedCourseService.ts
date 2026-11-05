@@ -1,4 +1,4 @@
-import type { Logger } from '@ehub/shared';
+import { getTelemetry, type Logger, type TelemetrySpan } from '@ehub/shared';
 
 import type { CourseAccessResolver } from '../auth/courseAccess.js';
 import type { AuthenticatedCaller } from '../http/authentication.js';
@@ -62,6 +62,28 @@ export class AuthorizedCourseService implements CourseAccessResolver {
   }
 
   async resolve(caller: AuthenticatedCaller): Promise<readonly number[]> {
+    return await getTelemetry().span('authorization.courses', async (span) => {
+      try {
+        const courses = await this.#resolveCourses(caller, span);
+        span.set({ 'ehub.count.courses': courses.length });
+        return courses;
+      } catch (error) {
+        span.fail(
+          error instanceof IdentityNotMappedError
+            ? 'identity_not_mapped'
+            : error instanceof AuthorizationUnavailableError
+              ? error.reason
+              : 'error',
+        );
+        throw error;
+      }
+    });
+  }
+
+  async #resolveCourses(
+    caller: AuthenticatedCaller,
+    span: TelemetrySpan,
+  ): Promise<readonly number[]> {
     if (caller.mock) {
       return this.#mockCourseIds;
     }
@@ -69,6 +91,7 @@ export class AuthorizedCourseService implements CourseAccessResolver {
     const key: EntraUserKey = { tenantId: claims.tenantId, objectId: claims.objectId };
     const cached = await this.#options.cache.lookup(key);
     if (cached?.fresh === true) {
+      span.set({ 'ehub.source': 'cache' });
       return this.#outcome(cached.value, 'cache');
     }
     let value: CachedAuthorization;
@@ -86,6 +109,7 @@ export class AuthorizedCourseService implements CourseAccessResolver {
           reason: error.reason,
           ageMs: stale.ageMs,
         });
+        span.set({ 'ehub.source': 'stale' });
         return this.#outcome(stale.value, 'stale');
       }
       this.#logger.error('Course authorisation could not be confirmed.', {
@@ -94,6 +118,7 @@ export class AuthorizedCourseService implements CourseAccessResolver {
       });
       throw error;
     }
+    span.set({ 'ehub.source': 'moodle' });
     return this.#outcome(value, 'moodle');
   }
 

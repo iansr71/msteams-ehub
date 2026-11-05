@@ -43,3 +43,4 @@ export {
   type ResourceStateQuery,
   type SyncStateRepository,
 } from './state/syncStateRepository.js';
+export * from './jobs/syncMetrics.js';

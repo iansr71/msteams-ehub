@@ -89,6 +89,9 @@ export interface AdminArea {
   readonly runner: AdminJobRunner;
   readonly config: AdminConfig;
   readonly clientMode: AdminClientConfig['mode'];
+  /** The sync state the area reads (readiness and sync gauges). */
+  readonly syncState: SyncStateRepository;
+  readonly tenantId: string;
   close(): void;
 }
 
@@ -228,6 +231,8 @@ export function createAdminArea(options: {
     runner,
     config,
     clientMode: clientConfig.mode,
+    syncState: state,
+    tenantId: sync.AZURE_TENANT_ID,
     close: () => {
       clearInterval(timer);
     },

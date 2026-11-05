@@ -1,3 +1,4 @@
+import { getTelemetry } from '../telemetry/telemetry.js';
 import { getCorrelationId } from '../correlation/correlation.js';
 import { redact, redactString } from './redaction.js';
 
@@ -57,7 +58,7 @@ export interface LoggerOptions {
 
 // Fields that callers and bindings cannot overwrite, so a record's level, time, origin and
 // correlation can always be trusted.
-const RESERVED_FIELDS = ['time', 'level', 'service', 'correlationId', 'msg'] as const;
+const RESERVED_FIELDS = ['time', 'level', 'service', 'correlationId', 'traceId', 'msg'] as const;
 
 export function createLogger(options: LoggerOptions): Logger {
   const level = options.level ?? 'info';
@@ -128,11 +129,14 @@ class StructuredLogger implements Logger {
     }
 
     const correlationId = getCorrelationId();
+    // Links the log line to its trace in Application Insights when tracing is on.
+    const traceId = getTelemetry().currentTraceId();
     const record: Record<string, unknown> = {
       time: this.clock().toISOString(),
       level,
       service: this.service,
       ...(correlationId === undefined ? {} : { correlationId }),
+      ...(traceId === undefined ? {} : { traceId }),
       msg: redactString(message),
       ...(redact(merged) as Record<string, unknown>),
     };

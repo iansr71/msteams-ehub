@@ -272,3 +272,48 @@ changes go through the app settings.
 An override is approved by one application administrator, with a confirmation, a Moodle check
 that the account is active, and an audit record. Two-person approval was considered and left
 out: Skin Renewal has one IT administrator, so it would block every override.
+
+## Telemetry through a process-wide registry (phase 16)
+
+Components reach telemetry with `getTelemetry()`, configured once at start-up, rather than by
+constructor injection. Tracing and metrics touch the Moodle client, search, embeddings, the chat
+model, the indexer pipeline, authentication, authorisation and the admin area. Injecting it
+would change dozens of established constructors and option types for a cross-cutting concern.
+OpenTelemetry itself uses a global API for the same reason. It is still an interface (`Telemetry`)
+with a no-op default, an in-memory implementation that applies the production rules for tests,
+and an OpenTelemetry implementation.
+
+## Explicit spans; automatic instrumentation off (phase 16)
+
+Azure Monitor's distribution instruments outbound HTTP automatically, and that span records the
+full URL. Moodle file downloads carry the web-service token in the query string, so automatic
+HTTP spans would export the token. The SDK has no reliable hook to rewrite a span's attributes
+before export, so redaction after the fact is not an option. Every automatic instrumentation is
+off; the services create explicit spans whose names, attributes and metric dimensions are
+allow-listed (`telemetry/catalogue.ts`). The cost is that a new dependency needs its own span.
+
+## Rejected tokens are not span errors (phase 16)
+
+A refused token is recorded as an outcome and reason on `auth.validate` and counted in
+`ehub.auth.events`, not as a failed span. Application Insights counts failed spans in its
+failure rates, and a burst of bad tokens would look like an outage. The authentication-anomaly
+alert reads the counter instead. Signing keys that cannot be fetched are an error.
+
+## Readiness probes the chat model with a real completion (phase 16)
+
+The chat deployment has no cheap health endpoint, so readiness sends a fixed 16-token prompt.
+Results are cached for 30 seconds, so a load balancer probing every few seconds causes at
+most about 2,900 completions a day per API instance. Each is about 30 input tokens and a few
+output tokens: roughly US$0.10–0.30 a day at GPT-4o list prices. This is an estimate, not checked
+against Skin Renewal's deployment or contract pricing. The alternative was to report the model
+as up without checking, which would leave a broken key or deleted deployment invisible until
+staff asked a question.
+
+## Fixed-ratio sampling, not the distribution's default (phase 16)
+
+Azure Monitor's distribution (1.20.1) defaults to a rate-limited sampler of 5 traces a second.
+That sampler takes precedence over `samplingRatio`, adapts from zero at start-up, and in testing
+dropped the first spans of a process. At Skin Renewal's volume it would discard a varying share
+of traces, and with it the evidence for the alerts. `tracesPerSecond: 0` selects the fixed-ratio
+sampler; `samplingRatio: 1` keeps everything. This was found by running the real distribution
+(`tests/integration/azure-monitor-instrumentation.test.ts`), not from its documentation.

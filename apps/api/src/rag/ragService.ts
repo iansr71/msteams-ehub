@@ -1,4 +1,4 @@
-import { createLogger, type Logger } from '@ehub/shared';
+import { createLogger, getTelemetry, type Logger } from '@ehub/shared';
 import { z } from 'zod';
 
 import type { RetrievedChunk } from '../retrieval/retrievalResultMapper.js';
@@ -307,10 +307,35 @@ export class RagService {
       });
     }
 
-    const checked = this.#checker.check(generation.answer, prompt.sources, {
-      tenantId: user.tenantId,
-      courseIds: new Set(user.selectedCourseIds ?? user.authorizedCourseIds),
-      allowedHosts: this.#options.allowedHosts ?? new Set(),
+    const answerClaimedEvidence = !generation.answer.insufficientEvidence;
+    const checked = await getTelemetry().span('citation.validate', (span) => {
+      const result = this.#checker.check(generation.answer, prompt.sources, {
+        tenantId: user.tenantId,
+        courseIds: new Set(user.selectedCourseIds ?? user.authorizedCourseIds),
+        allowedHosts: this.#options.allowedHosts ?? new Set(),
+      });
+      const telemetry = getTelemetry();
+      span.set({
+        'ehub.count.citations': result.citations.length,
+        'ehub.count.removed_claims': result.removedClaims,
+      });
+      if (result.removedClaims > 0) {
+        telemetry.count(
+          'ehub.citation_validation.failures',
+          { reason: 'claim_removed' },
+          result.removedClaims,
+        );
+      }
+      if (answerClaimedEvidence && result.insufficientEvidence) {
+        // The model answered, but no claim survived validation.
+        telemetry.count('ehub.citation_validation.failures', { reason: 'answer_refused' });
+        span.fail('answer_refused');
+      }
+      if (!answerHasValidSources(result)) {
+        telemetry.count('ehub.citation_validation.failures', { reason: 'invariant_violation' });
+        span.fail('invariant_violation');
+      }
+      return Promise.resolve(result);
     });
     // Defence in depth: whatever the checks above decided, an answer without a valid source is
     // never returned.

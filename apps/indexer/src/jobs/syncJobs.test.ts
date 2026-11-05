@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { MoodleAuthenticationError, MoodleTransportError } from '@ehub/moodle-client';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { InMemoryTelemetry, resetTelemetry, setTelemetry } from '@ehub/shared';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadBinary } from '../extractors/__fixtures__/helpers.js';
 import { pdfExtractor } from '../extractors/pdfExtractor.js';
 import { ResourceNotFoundError } from '../moodle/inspectCourse.js';
 import { FileSyncStateRepository } from '../state/fileSyncStateRepository.js';
+import { InMemorySyncStateRepository } from '../state/inMemorySyncStateRepository.js';
 import { courseLeaseName } from '../state/syncState.js';
 import {
   FakeMoodleSite,
@@ -26,6 +28,7 @@ import {
   syncCourse,
   syncResource,
 } from './syncJobs.js';
+import { reportSyncGauges } from './syncMetrics.js';
 import { renderSyncReportText, type SyncReport } from './syncReport.js';
 
 const SECRET = 'Zebra-orchid protocol requires SPF 50 reapplied every ninety minutes';
@@ -640,5 +643,114 @@ describe('single course and resource jobs', () => {
     );
     expect(report.courses.map((course) => course.courseId)).toEqual([12, 15]);
     expect(report.counts.updated).toBe(3);
+  });
+});
+
+describe('telemetry', () => {
+  let memory: InMemoryTelemetry;
+  beforeEach(() => {
+    memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+  });
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('records pipeline stages, failures, the job and the sync gauges without content', async () => {
+    h.site.setFile(12, 702, {
+      fileName: 'Aftercare.pdf',
+      bytes: loadBinary('encrypted.pdf'),
+      mimeType: 'application/pdf',
+    });
+    const services = await h.services();
+    const report = await incrementalSync(services, { jobId: 'job-telemetry' });
+    expect(report.status).toBe('completed_with_failures');
+
+    expect(memory.find('ehub.pipeline.failures')).toEqual([
+      expect.objectContaining({ dimensions: { stage: 'extraction', category: 'encrypted' } }),
+    ]);
+    for (const stage of ['extraction', 'chunking', 'embedding', 'indexing']) {
+      expect(
+        memory.find('ehub.pipeline.duration', { stage, outcome: 'success' }).length,
+        stage,
+      ).toBeGreaterThan(0);
+    }
+    expect(memory.find('ehub.sync.jobs')).toEqual([
+      expect.objectContaining({
+        dimensions: { job_type: 'incremental', status: 'completed_with_failures' },
+      }),
+    ]);
+    const job = memory.spans.find((span) => span.name === 'sync.job');
+    expect(job?.attributes).toMatchObject({
+      'ehub.job_type': 'incremental',
+      'ehub.job_id': 'job-telemetry',
+      'ehub.status': 'completed_with_failures',
+    });
+    // Stage spans are children of the job span.
+    expect(
+      memory.spans
+        .filter((span) => span.name === 'pipeline.extract')
+        .every((span) => {
+          let parent = span.parent;
+          while (parent !== undefined && parent !== job) {
+            parent = parent.parent;
+          }
+          return parent === job;
+        }),
+    ).toBe(true);
+    expect(memory.spans.map((span) => span.name)).toEqual(
+      expect.arrayContaining([
+        'pipeline.chunk',
+        'pipeline.embed',
+        'embedding.request',
+        'pipeline.index',
+        'search.index',
+      ]),
+    );
+
+    // Gauges: resource statuses; no lag yet because no job has fully succeeded.
+    expect(memory.find('ehub.sync.resources', { status: 'indexed' }).at(-1)?.value).toBe(1);
+    expect(memory.find('ehub.sync.resources', { status: 'quarantined' }).at(-1)?.value).toBe(1);
+    expect(memory.find('ehub.sync.lag')).toEqual([]);
+
+    const recorded = JSON.stringify({
+      spans: memory.spans.map((span) => span.attributes),
+      metrics: memory.metrics,
+    });
+    expect(recorded).not.toContain(SECRET);
+    expect(recorded).not.toContain('Aftercare');
+    expect(recorded).not.toContain('token');
+    expect(recorded).not.toContain('http');
+    expect(memory.dropped).toBe(0);
+  });
+
+  it('reports sync lag after a successful job and names job types as codes', async () => {
+    const services = await h.services();
+    await retryFailedResources(services);
+    expect(memory.find('ehub.sync.jobs')).toEqual([
+      expect.objectContaining({ dimensions: { job_type: 'retry_failed', status: 'succeeded' } }),
+    ]);
+    expect(memory.find('ehub.sync.lag')).toHaveLength(1);
+    expect(memory.find('ehub.sync.lag')[0]?.value).toBeGreaterThanOrEqual(0);
+  });
+
+  it('counts no job and reports no gauges for a dry run, and never treats one as the last sync', async () => {
+    const services = await h.services();
+    await incrementalSync(services, { dryRun: true });
+    expect(memory.find('ehub.sync.jobs')).toEqual([]);
+    expect(memory.find('ehub.sync.resources')).toEqual([]);
+    // Dry runs save no job record. Should one exist (written by another version), it still
+    // must not count as the last successful sync.
+    await incrementalSync(services, { jobId: 'job-real' });
+    const [real] = await h.state.listJobs(1);
+    expect(real?.status).toBe('succeeded');
+    const isolated = new InMemorySyncStateRepository();
+    if (real !== undefined) {
+      await isolated.saveJob({ ...real, jobId: 'job-dry', dryRun: true });
+    }
+    memory.metrics.length = 0;
+    const snapshot = await reportSyncGauges(isolated, TENANT_ID, new Date());
+    expect(snapshot.lagSeconds).toBeUndefined();
+    expect(memory.find('ehub.sync.lag')).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { classifyByCategory, trackDependency } from '../telemetry/telemetry.js';
 
 import {
   RETRYABLE_HTTP_STATUSES,
@@ -209,6 +210,19 @@ export class AzureOpenAIEmbeddingProvider implements EmbeddingProvider {
     if (texts.length === 0) {
       return [];
     }
+    return await trackDependency(
+      {
+        span: 'embedding.request',
+        dependency: 'embedding',
+        operation: 'embed',
+        attributes: { 'ehub.count.inputs': texts.length },
+        classify: classifyByCategory,
+      },
+      () => this.#embedBatch(texts, options),
+    );
+  }
+
+  async #embedBatch(texts: readonly string[], options: EmbedOptions): Promise<Embedding[]> {
     const started = Date.now();
     const prepared = texts.map((text, index) => this.#prepare(text, index));
 

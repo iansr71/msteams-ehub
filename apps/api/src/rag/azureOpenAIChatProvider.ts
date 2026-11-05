@@ -1,4 +1,4 @@
-import { createLogger, type Logger } from '@ehub/shared';
+import { classifyByCategory, createLogger, trackDependency, type Logger } from '@ehub/shared';
 import {
   RETRYABLE_HTTP_STATUSES,
   RETRYABLE_NETWORK_CODES,
@@ -156,6 +156,18 @@ export class AzureOpenAIChatProvider implements ChatModelProvider {
   }
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletion> {
+    return await trackDependency(
+      {
+        span: 'model.generate',
+        dependency: 'chat',
+        operation: 'complete',
+        classify: classifyByCategory,
+      },
+      () => this.#complete(request),
+    );
+  }
+
+  async #complete(request: ChatCompletionRequest): Promise<ChatCompletion> {
     const started = Date.now();
     for (let attempt = 0; ; attempt += 1) {
       try {

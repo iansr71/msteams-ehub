@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createLogger } from '@ehub/shared';
+import { InMemoryTelemetry, createLogger, resetTelemetry, setTelemetry } from '@ehub/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -649,5 +649,41 @@ describe('administration records', () => {
       'Logging',
       'Retention and caching',
     ]);
+  });
+});
+
+describe('administration telemetry', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('counts actions by outcome and role refusals as access denials', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const h = await start();
+    expect((await h.request('/admin/api/actions/incremental-sync', { body: {} })).status).toBe(202);
+    await h.runner.idle();
+    expect(
+      (await h.request('/admin/api/actions/reindex', { body: { courseId: INCLUDED_COURSE } }))
+        .status,
+    ).toBe(400);
+    const auditor = await h.tokenFor(['EHub.Auditor']);
+    expect(
+      (await h.request('/admin/api/actions/incremental-sync', { body: {}, token: auditor })).status,
+    ).toBe(403);
+
+    expect(memory.find('ehub.admin.actions').map((entry) => entry.dimensions)).toEqual([
+      { action: 'sync.incremental', status: 'accepted' },
+      { action: 'course.reindex', status: 'refused' },
+      { action: 'sync.incremental', status: 'refused' },
+    ]);
+    expect(memory.find('ehub.access.denials', { kind: 'admin_forbidden' })).toHaveLength(1);
+    expect(
+      memory.spans
+        .filter((span) => span.name === 'admin.action')
+        .map((span) => span.attributes['ehub.reason']),
+    ).toEqual([undefined, 'confirmation_required', 'forbidden']);
+    expect(memory.dropped).toBe(0);
+    expect(JSON.stringify(memory.metrics)).not.toContain(ADMIN_OID);
   });
 });

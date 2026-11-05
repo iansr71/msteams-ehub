@@ -1,6 +1,6 @@
-import { createLogger } from '@ehub/shared';
+import { InMemoryTelemetry, createLogger, resetTelemetry, setTelemetry } from '@ehub/shared';
 import { apiKeyAuthenticator, tokenCredentialAuthenticator } from '@ehub/shared/search';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MODEL_ANSWER_RESPONSE_SCHEMA } from './answerSchema.js';
 import {
@@ -244,5 +244,45 @@ describe('AzureOpenAIChatProvider', () => {
     }).instance.complete(request);
     expect(service.requests[0]?.headers['authorization']).toBe('Bearer entra-chat-token');
     expect(getToken).toHaveBeenCalledWith('https://ai.azure.com/.default', expect.anything());
+  });
+});
+
+describe('AzureOpenAIChatProvider telemetry', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('records model.generate as a chat dependency without prompt or completion text', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const { instance } = provider(fakeService([]).fetch);
+    await instance.complete(request);
+    await expect(
+      provider(fakeService([{ status: 401 }]).fetch).instance.complete(request),
+    ).rejects.toMatchObject({ category: 'authentication' });
+    expect(memory.spans.map((span) => [span.name, span.kind, span.status])).toEqual([
+      ['model.generate', 'client', 'ok'],
+      ['model.generate', 'client', 'error'],
+    ]);
+    expect(
+      memory.sum('ehub.dependency.failures', { dependency: 'chat', category: 'authentication' }),
+    ).toBe(1);
+    const text = JSON.stringify({
+      spans: memory.spans.map((span) => span.attributes),
+      metrics: memory.metrics,
+    });
+    expect(text).not.toContain(PROMPT_SECRET);
+    expect(text).not.toContain(ANSWER_SECRET);
+    expect(text).not.toContain(KEY);
+  });
+
+  it('counts exhausted throttling as a rate-limit event', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const throttled = { status: 429, headers: { 'retry-after': '1' } };
+    await expect(
+      provider(fakeService([throttled, throttled, throttled]).fetch).instance.complete(request),
+    ).rejects.toMatchObject({ category: 'throttled' });
+    expect(memory.find('ehub.rate_limit.events', { dependency: 'chat' })).toHaveLength(1);
   });
 });

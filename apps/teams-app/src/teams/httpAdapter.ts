@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import type { Logger } from '@ehub/shared';
+import { getTelemetry, statusClass, type Logger } from '@ehub/shared';
 import type { HttpMethod, HttpRouteHandler, IHttpServerAdapter } from '@microsoft/teams.apps';
 
 /** Teams activities are small; this bounds memory per request. */
@@ -13,6 +13,16 @@ export interface HealthReport {
   readonly version: string;
   readonly identityMode: 'entra-sso' | 'dev-mock' | 'none';
   readonly inFlightQuestions: number;
+}
+
+export interface BotReadiness {
+  readonly status: 'ready' | 'not_ready';
+  readonly dependencies: readonly {
+    readonly name: 'answer_api';
+    readonly status: 'up' | 'down';
+    readonly latencyMs: number;
+    readonly category: string | null;
+  }[];
 }
 
 const JSON_HEADERS = {
@@ -62,16 +72,20 @@ export class NodeHttpAdapter implements IHttpServerAdapter {
   readonly #routes = new Map<string, HttpRouteHandler>();
   readonly #logger: Logger;
   readonly #health: () => HealthReport;
+  readonly #ready: (() => Promise<BotReadiness>) | undefined;
   readonly #host: string;
   #server: Server | undefined;
 
   constructor(options: {
     readonly logger: Logger;
     readonly health: () => HealthReport;
+    /** Readiness: whether the answer API (the bot's required dependency) is reachable. */
+    readonly ready?: () => Promise<BotReadiness>;
     readonly host?: string;
   }) {
     this.#logger = options.logger.child({ component: 'bot-http' });
     this.#health = options.health;
+    this.#ready = options.ready;
     this.#host = options.host ?? '0.0.0.0';
   }
 
@@ -84,6 +98,23 @@ export class NodeHttpAdapter implements IHttpServerAdapter {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
     const method = request.method ?? 'GET';
     try {
+      if (path === '/health/live' || path === '/health/ready') {
+        if (method !== 'GET') {
+          respond(response, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        if (path === '/health/live') {
+          // Liveness never depends on the answer API: an API outage must not restart the bot.
+          respond(response, 200, { status: 'live' });
+          return;
+        }
+        const readiness =
+          this.#ready === undefined
+            ? { status: 'ready' as const, dependencies: [] }
+            : await this.#ready();
+        respond(response, readiness.status === 'ready' ? 200 : 503, readiness);
+        return;
+      }
       if (path === '/health') {
         if (method !== 'GET') {
           respond(response, 405, { error: 'method_not_allowed' });
@@ -117,7 +148,29 @@ export class NodeHttpAdapter implements IHttpServerAdapter {
         request.resume();
         return;
       }
-      const result = await route({ body, headers: headersOf(request) });
+      const started = performance.now();
+      const telemetry = getTelemetry();
+      // The Bot Framework request: the activity's own text and IDs are never attributes.
+      const result = await telemetry.span(
+        'teams.activity',
+        async (span) => {
+          const routed = await route({ body, headers: headersOf(request) });
+          span.set({ 'http.response.status_code': routed.status });
+          if (routed.status >= 500) {
+            span.fail('server_error');
+          }
+          return routed;
+        },
+        { kind: 'server', attributes: { 'ehub.service': 'teams', 'http.request.method': method } },
+      );
+      telemetry.duration('ehub.http.server.duration', performance.now() - started, {
+        service: 'teams',
+        route: 'teams_messages',
+        status_class: statusClass(result.status),
+      });
+      if (result.status === 401 || result.status === 403) {
+        telemetry.count('ehub.access.denials', { kind: 'bot_request_unauthenticated' });
+      }
       respond(response, result.status, result.body);
     } catch (error) {
       this.#logger.error('Bot request failed.', { path, err: error });

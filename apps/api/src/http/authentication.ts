@@ -1,4 +1,4 @@
-import type { Logger } from '@ehub/shared';
+import { getTelemetry, type Logger } from '@ehub/shared';
 import { MOCK_IDENTITY_HEADER } from '@ehub/shared/answers';
 
 import type { EntraTokenValidator } from '../auth/entraTokenValidator.js';
@@ -63,6 +63,25 @@ export class EntraBearerAuthenticator implements RequestAuthenticator {
   }
 
   async authenticate(headers: RequestHeaders): Promise<AuthenticationResult> {
+    return await getTelemetry().span('auth.validate', async (span) => {
+      const result = await this.#authenticate(headers);
+      const outcome = result.kind === 'authenticated' ? 'success' : 'failure';
+      const reason =
+        result.kind === 'authenticated'
+          ? 'valid'
+          : 'reason' in result
+            ? result.reason
+            : 'not_configured';
+      span.set({ 'ehub.outcome': outcome, 'ehub.reason': reason });
+      if (result.kind === 'unavailable') {
+        span.fail('keys_unavailable');
+      }
+      getTelemetry().count('ehub.auth.events', { outcome, reason });
+      return result;
+    });
+  }
+
+  async #authenticate(headers: RequestHeaders): Promise<AuthenticationResult> {
     const header = single(headers, 'authorization');
     if (header === undefined) {
       return { kind: 'unauthenticated', reason: 'missing_token' };

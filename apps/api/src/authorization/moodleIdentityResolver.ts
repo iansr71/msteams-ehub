@@ -1,6 +1,6 @@
 import type { MoodleClient, MoodleUser } from '@ehub/moodle-client';
 import { MoodleError } from '@ehub/moodle-client';
-import type { Logger, UpnUsernameRule } from '@ehub/shared';
+import { getTelemetry, type Logger, type UpnUsernameRule } from '@ehub/shared';
 
 import type { IdentityMappingRepository } from './identityMappingRepository.js';
 import type { MappingFailureReason, MappingMethod } from './records.js';
@@ -93,7 +93,21 @@ export class MoodleIdentityResolver {
     options: { readonly audit?: boolean } = {},
   ): Promise<IdentityResolution> {
     const audit = options.audit ?? true;
-    const resolution = await this.#resolve(claims);
+    const resolution = await getTelemetry().span('identity.resolve', async (span) => {
+      const result = await this.#resolve(claims);
+      span.set({
+        'ehub.outcome': result.status,
+        ...(result.method === undefined ? {} : { 'ehub.method': result.method }),
+        ...(result.status === 'denied' ? { 'ehub.reason': result.reason } : {}),
+        ...(claims.accountType === undefined ? {} : { 'ehub.account_type': claims.accountType }),
+      });
+      getTelemetry().count('ehub.identity.mappings', {
+        status: result.status,
+        method: result.method,
+        reason: result.status === 'denied' ? result.reason : undefined,
+      });
+      return result;
+    });
     // Logs carry the method or reason only, never email or UPN.
     if (resolution.status === 'mapped') {
       this.#logger.info('Moodle identity resolved.', {

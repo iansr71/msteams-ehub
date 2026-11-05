@@ -11,13 +11,15 @@ import {
 import { EntraTokenValidator } from '../auth/entraTokenValidator.js';
 import { InterimCourseAccess } from '../auth/courseAccess.js';
 import { MOCK_OBJECT_ID } from '../auth/userIdentity.js';
-import { createLogger } from '@ehub/shared';
+import { InMemoryTelemetry, createLogger, resetTelemetry, setTelemetry } from '@ehub/shared';
 import {
   MOCK_IDENTITY_HEADER,
   answerResponseSchema,
   apiErrorResponseSchema,
 } from '@ehub/shared/answers';
 import { afterEach, describe, expect, it } from 'vitest';
+
+import type { ReadinessReport } from '../health/readiness.js';
 
 import { SECRET_SENTENCE, TENANT_ID, seededSearch } from '../retrieval/__fixtures__/corpus.js';
 import { RetrievalService } from '../retrieval/retrievalService.js';
@@ -112,6 +114,7 @@ async function serve(
     answerer?: Answerer;
     authenticator?: RequestAuthenticator;
     requestTimeoutMs?: number;
+    readiness?: { report(): Promise<ReadinessReport> };
   } = {},
 ): Promise<Harness> {
   const requests: RagRequest[] = [];
@@ -153,6 +156,7 @@ async function serve(
       },
       tenantId: TENANT_ID,
       requestTimeoutMs: options.requestTimeoutMs ?? 5_000,
+      ...(options.readiness === undefined ? {} : { readiness: options.readiness }),
       logger: createLogger({
         service: 'test',
         level: 'trace',
@@ -549,5 +553,126 @@ describe('answer API with Entra ID tokens', () => {
     expect(apiErrorResponseSchema.parse(await response.json()).error.code).toBe(
       'no_authorized_courses',
     );
+  });
+});
+
+describe('health endpoints and telemetry', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  function report(status: ReadinessReport['status']): ReadinessReport {
+    return {
+      status,
+      checkedAt: '2026-11-04T10:00:00.000Z',
+      dependencies: [
+        {
+          name: 'search',
+          required: true,
+          status: status === 'ready' ? 'up' : 'down',
+          latencyMs: 3,
+          category: status === 'ready' ? null : 'timeout',
+          checkedAt: '2026-11-04T10:00:00.000Z',
+        },
+      ],
+    };
+  }
+
+  it('answers liveness without touching dependencies', async () => {
+    let probed = 0;
+    const h = await serve({
+      readiness: {
+        report: () => {
+          probed += 1;
+          return Promise.resolve(report('not_ready'));
+        },
+      },
+    });
+    const live = await fetch(`${h.url}/health/live`);
+    expect(live.status).toBe(200);
+    expect(await live.json()).toEqual({ status: 'live' });
+    expect(probed).toBe(0);
+    expect((await fetch(`${h.url}/health/live`, { method: 'POST' })).status).toBe(405);
+  });
+
+  it('reports readiness from the dependency checks', async () => {
+    let current: ReadinessReport['status'] = 'ready';
+    const h = await serve({ readiness: { report: () => Promise.resolve(report(current)) } });
+    const ready = await fetch(`${h.url}/health/ready`);
+    expect(ready.status).toBe(200);
+    expect(await ready.json()).toMatchObject({
+      status: 'ready',
+      identityConfigured: true,
+      dependencies: [{ name: 'search', status: 'up' }],
+    });
+    current = 'not_ready';
+    const down = await fetch(`${h.url}/health/ready`);
+    expect(down.status).toBe(503);
+    expect(await down.json()).toMatchObject({
+      status: 'not_ready',
+      dependencies: [{ name: 'search', status: 'down', category: 'timeout' }],
+    });
+  });
+
+  it('is not ready without an identity provider, even when dependencies are up', async () => {
+    const h = await serve({
+      authenticator: noAuthenticator,
+      readiness: { report: () => Promise.resolve(report('ready')) },
+    });
+    const response = await fetch(`${h.url}/health/ready`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ status: 'not_ready', identityConfigured: false });
+  });
+
+  it('continues the caller trace and records the request by route only', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const h = await serve();
+    const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    await post(
+      `${h.url}/v1/answers`,
+      { question: QUESTION },
+      { [MOCK_IDENTITY_HEADER]: MOCK_USER, traceparent },
+    );
+    await post(`${h.url}/v1/answers`, { question: QUESTION }, {});
+    expect(memory.remoteParents).toEqual([traceparent]);
+    const spans = memory.spans.filter((span) => span.name === 'api.request');
+    expect(spans.map((span) => span.attributes['http.response.status_code'])).toEqual([200, 401]);
+    expect(spans[0]).toMatchObject({ kind: 'server', attributes: { 'ehub.route': 'answers' } });
+    expect(
+      memory.find('ehub.http.server.duration', { route: 'answers', status_class: '2xx' }),
+    ).toHaveLength(1);
+    expect(memory.sum('ehub.access.denials', { kind: 'unauthenticated' })).toBe(1);
+    const recorded = JSON.stringify({
+      spans: memory.spans.map((s) => s.attributes),
+      metrics: memory.metrics,
+    });
+    expect(recorded).not.toContain(QUESTION);
+    expect(recorded).not.toContain('/v1/answers');
+    expect(recorded).not.toContain(MOCK_USER);
+    expect(memory.dropped).toBe(0);
+  });
+
+  it('counts rate limiting as a rate-limit event', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const h = await serve({
+      answerer: { ask: () => Promise.reject(new RagRateLimitError(1_000)) },
+    });
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(429);
+    expect(memory.sum('ehub.rate_limit.events', { dependency: 'answer_api' })).toBe(1);
+  });
+
+  it('marks a server error span failed with the error code', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const h = await serve({
+      answerer: { ask: () => Promise.reject(new Error('https://moodle/?token=abc')) },
+    });
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(500);
+    expect(memory.spans.find((span) => span.name === 'api.request')).toMatchObject({
+      status: 'error',
+      failureCategory: 'internal_error',
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { classifyByCategory, trackDependency, type TelemetrySpan } from '../telemetry/telemetry.js';
 
 import { createLogger, type Logger } from '../logging/logger.js';
 import type { SearchAuthenticator } from './auth.js';
@@ -491,36 +492,44 @@ export class RestSearchIndexClient implements SearchIndexClient {
     documents: readonly SearchDocument[],
     options: SearchCallOptions = {},
   ): Promise<IndexingReport> {
-    return await this.#indexDocuments(
-      'upload',
-      this.#prepareDocuments('upload', documents),
-      options,
-    );
+    return await trackSearch('index', async (span) => {
+      span.set({ 'ehub.count.chunks': documents.length });
+      return await this.#indexDocuments(
+        'upload',
+        this.#prepareDocuments('upload', documents),
+        options,
+      );
+    });
   }
 
   async mergeOrUploadChunks(
     documents: readonly SearchDocument[],
     options: SearchCallOptions = {},
   ): Promise<IndexingReport> {
-    return await this.#indexDocuments(
-      'mergeOrUpload',
-      this.#prepareDocuments('mergeOrUpload', documents),
-      options,
-    );
+    return await trackSearch('index', async (span) => {
+      span.set({ 'ehub.count.chunks': documents.length });
+      return await this.#indexDocuments(
+        'mergeOrUpload',
+        this.#prepareDocuments('mergeOrUpload', documents),
+        options,
+      );
+    });
   }
 
   deleteChunksByResource(
     scope: Required<DocumentScope>,
     options: SearchCallOptions = {},
   ): Promise<DeletionReport> {
-    return this.#deleteByScope(scope, options);
+    return trackSearch('delete', () => this.#deleteByScope(scope, options));
   }
 
   deleteChunksByCourse(
     scope: Omit<DocumentScope, 'resourceId'>,
     options: SearchCallOptions = {},
   ): Promise<DeletionReport> {
-    return this.#deleteByScope({ tenantId: scope.tenantId, courseId: scope.courseId }, options);
+    return trackSearch('delete', () =>
+      this.#deleteByScope({ tenantId: scope.tenantId, courseId: scope.courseId }, options),
+    );
   }
 
   async listChunkKeys(
@@ -533,6 +542,13 @@ export class RestSearchIndexClient implements SearchIndexClient {
   async deleteChunksByKeys(
     keys: readonly string[],
     options: SearchCallOptions = {},
+  ): Promise<IndexingReport> {
+    return await trackSearch('delete', () => this.#deleteChunksByKeys(keys, options));
+  }
+
+  async #deleteChunksByKeys(
+    keys: readonly string[],
+    options: SearchCallOptions,
   ): Promise<IndexingReport> {
     const unique = [...new Set(keys)];
     for (const key of unique) {
@@ -821,6 +837,25 @@ export class RestSearchIndexClient implements SearchIndexClient {
   // ---------------------------------------------------------------- queries
 
   async search(query: SearchQuery, options: SearchCallOptions = {}): Promise<SearchResults> {
+    return await trackDependency(
+      {
+        span: 'search.query',
+        dependency: 'search',
+        operation: 'query',
+        attributes: {
+          'ehub.count.courses': query.courseIds?.length ?? query.authorizedCourseIds.length,
+        },
+        classify: classifyByCategory,
+      },
+      async (span) => {
+        const results = await this.#search(query, options);
+        span.set({ 'ehub.count.results': results.hits.length });
+        return results;
+      },
+    );
+  }
+
+  async #search(query: SearchQuery, options: SearchCallOptions): Promise<SearchResults> {
     const started = Date.now();
     // Built first so an unscoped or malformed query fails before any network traffic.
     const plan = buildSearchRequest(query, {
@@ -1106,4 +1141,15 @@ function failureOf(error: unknown): Pick<SearchHealthReport, 'failure'> {
 
 function describeError(error: unknown): string {
   return isSearchServiceError(error) ? error.message : 'Unexpected failure.';
+}
+
+/** Indexing writes and deletions, as search dependency calls. */
+function trackSearch<T>(
+  operation: 'index' | 'delete',
+  fn: (span: TelemetrySpan) => Promise<T>,
+): Promise<T> {
+  return trackDependency(
+    { span: 'search.index', dependency: 'search', operation, classify: classifyByCategory },
+    fn,
+  );
 }

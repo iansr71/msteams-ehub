@@ -28,6 +28,7 @@ import {
   type RagAnswer,
 } from '../rag/ragService.js';
 import { RetrievalOrchestrator } from '../rag/retrievalOrchestrator.js';
+import type { QueryEmbedder, SearchPort } from '../retrieval/retrievalService.js';
 import {
   describeFailure,
   openRetrieval,
@@ -115,10 +116,19 @@ export function renderAnswerText(answer: RagAnswer, options: { excerpts: boolean
 export async function openRagService(
   dependencies: AskCommandDependencies,
   logger: Logger,
-): Promise<{ rag: RagService; tenantId: string }> {
+): Promise<{
+  rag: RagService;
+  tenantId: string;
+  probes: { search: SearchPort; embedder: QueryEmbedder | undefined; model: ChatModelProvider };
+}> {
   const chatSettings = loadConfig(chatConfigSchema, dependencies.env);
   // Answers always use hybrid retrieval, so embeddings are required here.
-  const { service: retrieval, tenantId } = await openRetrieval(dependencies, logger, {
+  const {
+    service: retrieval,
+    tenantId,
+    search,
+    embedder,
+  } = await openRetrieval(dependencies, logger, {
     requireEmbeddings: true,
   });
   const model = await (
@@ -147,7 +157,7 @@ export async function openRagService(
     ),
     logger,
   });
-  return { rag, tenantId };
+  return { rag, tenantId, probes: { search, embedder, model } };
 }
 
 export function createAskCommand(dependencies: AskCommandDependencies): CommandDefinition {

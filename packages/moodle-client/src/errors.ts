@@ -119,3 +119,14 @@ export class MoodleApiError extends MoodleError {
 export function isMoodleError(error: unknown): error is MoodleError {
   return error instanceof MoodleError;
 }
+
+/** Telemetry codes for a failed Moodle call: the error's category, never its message. */
+export function classifyMoodleFailure(error: unknown): {
+  readonly category: string;
+  readonly rateLimited: boolean;
+} {
+  if (!isMoodleError(error)) {
+    return { category: 'unexpected', rateLimited: false };
+  }
+  return { category: error.category, rateLimited: error.category === 'rate_limit' };
+}

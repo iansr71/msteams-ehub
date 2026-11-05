@@ -1,10 +1,11 @@
-import { createLogger, registerSecretValue, type Logger } from '@ehub/shared';
+import { createLogger, registerSecretValue, trackDependency, type Logger } from '@ehub/shared';
 
 import type { NormalizedMoodleBaseUrl } from './baseUrl.js';
 import {
   MoodleApiError,
   MoodleTransportError,
   MoodleValidationError,
+  classifyMoodleFailure,
   isMoodleError,
   type MoodleError,
 } from './errors.js';
@@ -107,6 +108,22 @@ export class HttpMoodleTransport implements MoodleTransport {
     functionName: MoodleFunctionName,
     params: MoodleParams,
     options: MoodleCallOptions = {},
+  ): Promise<unknown> {
+    return await trackDependency(
+      {
+        span: 'moodle.request',
+        dependency: 'moodle',
+        operation: functionName,
+        classify: classifyMoodleFailure,
+      },
+      () => this.#call(functionName, params, options),
+    );
+  }
+
+  async #call(
+    functionName: MoodleFunctionName,
+    params: MoodleParams,
+    options: MoodleCallOptions,
   ): Promise<unknown> {
     for (const name of Object.keys(params)) {
       if (RESERVED_PARAMETERS.has(name.toLowerCase())) {

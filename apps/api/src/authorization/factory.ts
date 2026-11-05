@@ -43,6 +43,8 @@ export interface AuthorizationServices {
   readonly cache: AuthorizationCache;
   readonly courses: AuthorizedCourseService;
   readonly syncJob: EnrolmentSyncJob;
+  /** The Moodle client (or test double), for readiness probes. */
+  readonly moodle: AuthorizationMoodle;
 }
 
 /** Moodle-based authorisation is used when the Moodle service token is configured. */
@@ -94,5 +96,5 @@ export function createAuthorizationServices(
     logger,
   });
   const syncJob = new EnrolmentSyncJob({ repository, resolver, enrolments, logger });
-  return { config, repository, resolver, enrolments, cache, courses, syncJob };
+  return { config, repository, resolver, enrolments, cache, courses, syncJob, moodle };
 }

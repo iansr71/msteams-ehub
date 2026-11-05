@@ -1,4 +1,4 @@
-import { createLogger, registerSecretValue, type Logger } from '@ehub/shared';
+import { createLogger, registerSecretValue, trackDependency, type Logger } from '@ehub/shared';
 
 import type { NormalizedMoodleBaseUrl } from './baseUrl.js';
 import {
@@ -6,6 +6,7 @@ import {
   MoodleAuthenticationError,
   MoodleTransportError,
   MoodleValidationError,
+  classifyMoodleFailure,
   isMoodleError,
   type MoodleError,
 } from './errors.js';
@@ -120,6 +121,24 @@ export class HttpMoodleFileDownloader implements MoodleFileDownloader {
     fileUrl: string,
     options: MoodleDownloadOptions = {},
   ): Promise<MoodleDownloadedFile> {
+    // The URL is never a span attribute or dimension: Moodle file URLs name the resource and
+    // the request URL carries the token.
+    return await trackDependency(
+      {
+        span: 'moodle.download',
+        dependency: 'moodle_download',
+        operation: 'file',
+        classify: classifyMoodleFailure,
+      },
+      async (span) => {
+        const file = await this.#download(fileUrl, options);
+        span.set({ 'ehub.count.bytes': file.byteLength });
+        return file;
+      },
+    );
+  }
+
+  async #download(fileUrl: string, options: MoodleDownloadOptions): Promise<MoodleDownloadedFile> {
     const sourceUrl = this.toSourceUrl(fileUrl);
     if (
       options.maxBytes !== undefined &&

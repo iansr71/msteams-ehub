@@ -108,6 +108,9 @@ export function resolveInputPath(dependencies: RetrievalCommandDependencies, pat
 export interface RetrievalSetup {
   readonly service: RetrievalService;
   readonly tenantId: string;
+  /** The underlying clients, for readiness probes. */
+  readonly search: SearchPort;
+  readonly embedder: QueryEmbedder | undefined;
 }
 
 /**
@@ -144,6 +147,8 @@ export async function openRetrieval(
       logger,
     }),
     tenantId,
+    search,
+    embedder,
   };
 }
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { runWithCorrelationId } from '../correlation/correlation.js';
+import { InMemoryTelemetry, resetTelemetry, setTelemetry } from '../telemetry/telemetry.js';
 import { createLogger, type LogSink } from './logger.js';
 import { REDACTED, clearRegisteredSecretValues, registerSecretValue } from './redaction.js';
 
@@ -164,5 +165,28 @@ describe('createLogger', () => {
 
     expect(lines).toHaveLength(1);
     expect(lines[0]).not.toContain('\n');
+  });
+});
+
+describe('trace correlation', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  it('adds the active trace ID and ignores a caller-supplied one', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const sink = memorySink();
+    const logger = createLogger({ service: 'test-service', sink, clock: fixedClock });
+
+    logger.info('Outside.', { traceId: 'forged' });
+    await memory.span('api.request', () => {
+      logger.info('Inside.', { traceId: 'forged' });
+      return Promise.resolve();
+    });
+
+    const [outside, inside] = sink.records();
+    expect(outside).not.toHaveProperty('traceId');
+    expect(inside?.['traceId']).toBe('0af7651916cd43dd8448eb211c80319c');
   });
 });

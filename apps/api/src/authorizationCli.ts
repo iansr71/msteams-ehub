@@ -3,7 +3,9 @@ import {
   createLogger,
   isLogLevelSetting,
   loadLocalEnvFile,
+  readPackageVersion,
   runCommandLine,
+  startTelemetryFromEnv,
   stderrSink,
 } from '@ehub/shared';
 
@@ -20,6 +22,13 @@ const logger = createLogger({
   sink: stderrSink,
 });
 
+const telemetry = await startTelemetryFromEnv({
+  serviceName: SERVICE_NAME,
+  version: readPackageVersion(new URL('../package.json', import.meta.url)),
+  env: process.env,
+  logger,
+});
+
 process.exitCode = await runCommandLine({
   programName: 'pnpm authorization',
   commands: createAuthorizationCommands({ env: process.env }),
@@ -29,3 +38,6 @@ process.exitCode = await runCommandLine({
     process.stdout.write(`${text}\n`);
   },
 });
+
+// Flush spans and metrics before a short-lived command exits.
+await telemetry.shutdown();

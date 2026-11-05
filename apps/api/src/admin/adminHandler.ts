@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 
-import type { Logger } from '@ehub/shared';
+import { getTelemetry, type Logger } from '@ehub/shared';
 import { z } from 'zod';
 
 import type { AuthenticatedCaller, RequestAuthenticator } from '../http/authentication.js';
@@ -255,6 +255,10 @@ export function createAdminHandler(
 
   const require = (caller: AuthenticatedCaller, permission: Permission): void => {
     if (!permissionsOf(caller.identity.roles).has(permission)) {
+      getTelemetry().count('ehub.access.denials', {
+        kind: 'admin_forbidden',
+        reason: permission.replace(/[:-]/g, '_'),
+      });
       throw new AdminError('forbidden');
     }
   };
@@ -353,27 +357,43 @@ export function createAdminHandler(
     ) => Promise<{ status: number; result: unknown }>,
   ): Promise<void> => {
     let target: AuditEvent['target'];
-    try {
-      require(caller, permission);
-      checkOrigin(request);
-      const { status, result } = await body((value) => {
-        target = value;
-      });
-      await audit(caller, action, 'accepted', correlationId, target);
-      sendJson(response, status, result, correlationId);
-    } catch (error) {
-      const known = error instanceof AdminError ? error : undefined;
-      const outcome = known === undefined || STATUS[known.code] >= 500 ? 'failed' : 'refused';
-      await audit(
-        caller,
-        action,
-        outcome,
-        correlationId,
-        target,
-        known?.reason ?? known?.code ?? 'internal_error',
-      );
-      throw error;
-    }
+    await getTelemetry().span(
+      'admin.action',
+      async (span) => {
+        try {
+          require(caller, permission);
+          checkOrigin(request);
+          const { status, result } = await body((value) => {
+            target = value;
+          });
+          await audit(caller, action, 'accepted', correlationId, target);
+          getTelemetry().count('ehub.admin.actions', { action, status: 'accepted' });
+          span.set({ 'ehub.status': 'accepted' });
+          sendJson(response, status, result, correlationId);
+        } catch (error) {
+          const known = error instanceof AdminError ? error : undefined;
+          const outcome = known === undefined || STATUS[known.code] >= 500 ? 'failed' : 'refused';
+          await audit(
+            caller,
+            action,
+            outcome,
+            correlationId,
+            target,
+            known?.reason ?? known?.code ?? 'internal_error',
+          );
+          getTelemetry().count('ehub.admin.actions', { action, status: outcome });
+          span.set({
+            'ehub.status': outcome,
+            'ehub.reason': known?.reason ?? known?.code ?? 'internal_error',
+          });
+          if (outcome === 'failed') {
+            span.fail(known?.code ?? 'internal_error');
+          }
+          throw error;
+        }
+      },
+      { attributes: { 'ehub.action': action } },
+    );
   };
 
   const identityControls = (): AdminIdentityControls => {

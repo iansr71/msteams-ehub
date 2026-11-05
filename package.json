@@ -21,6 +21,7 @@
     "test:integration": "vitest run --project integration",
     "test:security": "vitest run --project security",
     "api": "pnpm --silent --filter @ehub/api run cli",
+    "diagnose": "pnpm --silent --filter @ehub/api run cli diagnose",
     "indexer": "pnpm --silent --filter @ehub/indexer run cli",
     "evaluation": "pnpm --silent --filter @ehub/api run evaluation",
     "identity": "pnpm --silent --filter @ehub/api run identity",

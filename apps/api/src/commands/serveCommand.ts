@@ -16,6 +16,9 @@ import type { FetchFn } from '@ehub/moodle-client';
 import type { JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 
+import { reportSyncGauges } from '@ehub/indexer';
+
+import { createApiReadiness } from '../health/apiReadiness.js';
 import { startApiServer, type RunningApiServer } from '../http/apiServer.js';
 import { InterimCourseAccess, type CourseAccessResolver } from '../auth/courseAccess.js';
 import {
@@ -59,6 +62,8 @@ function entraConfigured(env: EnvironmentSource): boolean {
 }
 
 const serveArgs = z.object({}).strict();
+
+const SYNC_GAUGE_INTERVAL_MS = 5 * 60_000;
 
 export const PRODUCTION_REQUIREMENTS_MESSAGE =
   'In production the answer API needs Entra ID sign-in (ENTRA_API_CLIENT_ID, ENTRA_ALLOWED_CLIENT_APP_IDS) and Moodle course authorisation (MOODLE_TOKEN): see docs/authorization.md.';
@@ -119,7 +124,7 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
           const entra = entraConfigured(dependencies.env)
             ? loadConfig(entraAuthConfigSchema, dependencies.env)
             : undefined;
-          const { rag, tenantId } = await openRagService(dependencies, context.logger);
+          const { rag, tenantId, probes } = await openRagService(dependencies, context.logger);
           const authenticator = createAuthenticator(
             {
               nodeEnv: config.NODE_ENV,
@@ -175,6 +180,26 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
                 logger: context.logger,
               })
             : undefined;
+          const readiness = createApiReadiness({
+            ...probes,
+            authorization,
+            ...(admin === undefined ? {} : { syncState: admin.syncState }),
+            logger: context.logger,
+          });
+          // Sync lag and resource gauges, so a stalled scheduler shows up in monitoring.
+          const gauges =
+            admin === undefined
+              ? undefined
+              : setInterval(() => {
+                  reportSyncGauges(admin.syncState, admin.tenantId, new Date()).catch(
+                    (error: unknown) => {
+                      context.logger.warn('Sync gauges could not be reported.', {
+                        errorType: error instanceof Error ? error.name : typeof error,
+                      });
+                    },
+                  );
+                }, SYNC_GAUGE_INTERVAL_MS);
+          gauges?.unref();
           const logFeedback =
             dependencies.createFeedbackRecorder?.() ?? new LoggingFeedbackRecorder(context.logger);
           const server = await startApiServer(
@@ -187,6 +212,7 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
                 admin === undefined
                   ? logFeedback
                   : new StoringFeedbackRecorder(admin.stores.usage, logFeedback),
+              readiness,
               ...(admin === undefined
                 ? {}
                 : {
@@ -236,6 +262,7 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
           await (dependencies.waitForShutdown ?? defaultWaitForShutdown)(server);
           await server.close();
           admin?.close();
+          clearInterval(gauges);
           await admin?.runner.idle();
           context.logger.info('Answer API stopped.');
           return EXIT_OK;

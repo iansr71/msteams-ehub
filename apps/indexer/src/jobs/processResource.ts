@@ -1,3 +1,5 @@
+import { getTelemetry, trackStage } from '@ehub/shared';
+
 import { toExtractionResource } from '../extractors/extractionDiagnostics.js';
 import type { CourseResource, CourseStructure } from '../moodle/models.js';
 import { normalizeContent } from '../pipeline/normalizeContent.js';
@@ -125,13 +127,36 @@ export async function processResource(
       return { event: { kind: 'content_unchanged', source, fileHash: progress.fileHash } };
     }
 
-    const extraction = await services.extractors.extract(
-      toExtractionResource(resource, structure.course.fullName),
-      {
-        bytes: file.bytes,
-        declaredContentType: file.contentType,
-        lastModified: file.lastModified,
+    const extractionStarted = performance.now();
+    const extraction = await getTelemetry().span(
+      'pipeline.extract',
+      async (span) => {
+        const result = await services.extractors.extract(
+          toExtractionResource(resource, structure.course.fullName),
+          {
+            bytes: file.bytes,
+            declaredContentType: file.contentType,
+            lastModified: file.lastModified,
+          },
+        );
+        // Extraction reports failure as a result, not an exception: record it explicitly.
+        const category =
+          result.status === 'unsupported'
+            ? UNSUPPORTED_CONTENT_FAILURE.category
+            : result.status === 'failed'
+              ? classifyExtractionFailure(result.reason).category
+              : undefined;
+        if (category !== undefined) {
+          span.fail(category);
+          getTelemetry().count('ehub.pipeline.failures', { stage: 'extraction', category });
+        }
+        getTelemetry().duration('ehub.pipeline.duration', performance.now() - extractionStarted, {
+          stage: 'extraction',
+          outcome: category === undefined ? 'success' : 'failure',
+        });
+        return result;
       },
+      { attributes: { 'ehub.stage': 'extraction' } },
     );
     if (extraction.status === 'unsupported') {
       return await fail(UNSUPPORTED_CONTENT_FAILURE);
@@ -159,28 +184,43 @@ export async function processResource(
     const document = normalizeContent(extraction);
     const categoryId = structure.course.categoryId;
     const indexedAt = services.clock.now().toISOString();
-    const chunks = services.chunker.chunk(document, {
-      tenantId: settings.tenantId,
-      courseCategory: categoryId === undefined ? undefined : String(categoryId),
-      // Access is enforced per authorised course at query time (docs/retrieval.md).
-      access: { allowedUserIds: [], allowedGroupIds: [] },
-      indexedAt,
-    });
+    const chunks = await trackStage(
+      'chunking',
+      'pipeline.chunk',
+      (span) => {
+        const produced = services.chunker.chunk(document, {
+          tenantId: settings.tenantId,
+          courseCategory: categoryId === undefined ? undefined : String(categoryId),
+          // Access is enforced per authorised course at query time (docs/retrieval.md).
+          access: { allowedUserIds: [], allowedGroupIds: [] },
+          indexedAt,
+        });
+        span.set({ 'ehub.count.chunks': produced.length });
+        return Promise.resolve(produced);
+      },
+      stageCategory,
+    );
     if (chunks.length === 0) {
       return await fail({ scope: 'permanent', category: 'no_indexable_text' });
     }
 
-    const embedded = await embedChunks(
-      chunks,
-      services.embedder,
-      services.versions.embeddingDimensions,
-      job.signal === undefined ? {} : { signal: job.signal },
+    const embedded = await trackStage(
+      'embedding',
+      'pipeline.embed',
+      () =>
+        embedChunks(
+          chunks,
+          services.embedder,
+          services.versions.embeddingDimensions,
+          job.signal === undefined ? {} : { signal: job.signal },
+        ),
+      stageCategory,
     );
-    const replacement = await replaceResourceChunks(
-      services.search,
-      scope,
-      embedded.documents,
-      job.signal,
+    const replacement = await trackStage(
+      'indexing',
+      'pipeline.index',
+      () => replaceResourceChunks(services.search, scope, embedded.documents, job.signal),
+      stageCategory,
     );
     const { versions } = services;
     return {
@@ -210,4 +250,8 @@ export async function processResource(
     }
     return await fail(classifyError(error));
   }
+}
+
+function stageCategory(error: unknown): string {
+  return classifyError(error).category;
 }

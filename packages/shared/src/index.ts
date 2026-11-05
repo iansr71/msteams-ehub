@@ -9,3 +9,4 @@ export * from './health/health.js';
 export * from './logging/logger.js';
 export * from './logging/redaction.js';
 export * from './runtime/packageVersion.js';
+export * from './telemetry/index.js';
