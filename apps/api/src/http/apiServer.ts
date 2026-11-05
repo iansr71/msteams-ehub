@@ -26,6 +26,7 @@ import {
 } from '../rag/ragService.js';
 import { toAnswerResponse } from './answerDto.js';
 import type { CourseAccessResolver } from '../auth/courseAccess.js';
+import { AuthorizationUnavailableError, IdentityNotMappedError } from '../authorization/errors.js';
 import type { AuthenticatedCaller, RequestAuthenticator } from './authentication.js';
 import type { FeedbackRecorder } from './feedbackRecorder.js';
 
@@ -71,6 +72,8 @@ const STATUS_BY_CODE: Readonly<Record<ApiErrorCode, number>> = {
   authentication_unavailable: 503,
   no_authorized_courses: 403,
   course_not_authorized: 403,
+  identity_not_mapped: 403,
+  authorization_unavailable: 503,
   rate_limited: 429,
   timeout: 504,
   internal_error: 500,
@@ -90,6 +93,9 @@ const MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   authentication_unavailable: 'Sign-in cannot be checked right now. Try again shortly.',
   no_authorized_courses: 'You do not have access to any E-Hub courses.',
   course_not_authorized: 'You do not have access to the selected course.',
+  identity_not_mapped:
+    'Your Microsoft account is not linked to exactly one active E-Hub account. Contact IT.',
+  authorization_unavailable: 'Your E-Hub course access cannot be checked right now.',
   rate_limited: 'Too many questions; try again shortly.',
   timeout: 'The answer took too long.',
   internal_error: 'Something went wrong.',
@@ -310,6 +316,10 @@ export function createApiRequestHandler(
           code = 'invalid_question';
         } else if (error instanceof RagAuthorizationError) {
           code = error.code === 'invalid_user_context' ? 'unauthenticated' : error.code;
+        } else if (error instanceof IdentityNotMappedError) {
+          code = 'identity_not_mapped';
+        } else if (error instanceof AuthorizationUnavailableError) {
+          code = 'authorization_unavailable';
         } else if (error instanceof RagRateLimitError) {
           code = 'rate_limited';
           retryAfterMs = error.retryAfterMs;

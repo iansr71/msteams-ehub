@@ -20,13 +20,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "cli": "tsx --conditions=@ehub/source src/cli.ts",
     "start": "node dist/cli.js",
-    "evaluation": "tsx --conditions=@ehub/source src/evaluationCli.ts"
+    "evaluation": "tsx --conditions=@ehub/source src/evaluationCli.ts",
+    "identity": "tsx --conditions=@ehub/source src/identityCli.ts",
+    "authorization": "tsx --conditions=@ehub/source src/authorizationCli.ts"
   },
   "bin": {
     "ehub-api": "./dist/cli.js",
-    "ehub-evaluation": "./dist/evaluationCli.js"
+    "ehub-evaluation": "./dist/evaluationCli.js",
+    "ehub-identity": "./dist/identityCli.js",
+    "ehub-authorization": "./dist/authorizationCli.js"
   },
   "dependencies": {
+    "@ehub/moodle-client": "workspace:*",
     "@ehub/shared": "workspace:*",
     "jose": "6.2.12",
     "zod": "^4.6.7"

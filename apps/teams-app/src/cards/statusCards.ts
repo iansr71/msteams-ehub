@@ -77,6 +77,8 @@ export type ErrorKind =
   | 'sign_in_failed'
   | 'not_permitted'
   | 'no_access'
+  | 'not_linked'
+  | 'access_check_failed'
   | 'personal_only';
 
 const ERRORS: Readonly<Record<ErrorKind, { title: string; text: string; retry: boolean }>> = {
@@ -134,6 +136,16 @@ const ERRORS: Readonly<Record<ErrorKind, { title: string; text: string; retry: b
     title: 'No E-Hub access found',
     text: 'You do not seem to have access to any E-Hub courses that I can search. If you think this is wrong, contact IT.',
     retry: false,
+  },
+  not_linked: {
+    title: 'Your account is not linked to E-Hub',
+    text: 'I could not match your Microsoft account to exactly one active E-Hub account, so I cannot tell which courses you can see. Contact IT and quote the reference below.',
+    retry: false,
+  },
+  access_check_failed: {
+    title: 'Course access cannot be checked',
+    text: 'I cannot reach E-Hub to check which courses you can see, so I have not searched anything. Please try again in a few minutes.',
+    retry: true,
   },
   personal_only: {
     title: 'Personal chat only',

@@ -25,9 +25,6 @@ import { decodeRgbaPng, readPngInfo } from './png.js';
 export const MANIFEST_ENVIRONMENTS = ['development', 'production'] as const;
 export type ManifestEnvironment = (typeof MANIFEST_ENVIRONMENTS)[number];
 
-export const PRODUCTION_PACKAGE_BLOCKED =
-  'Production packages are blocked until course access from Moodle enrolments (phase 14) is implemented: signed-in users cannot yet be limited to their own courses.';
-
 const environmentFileSchema = z.strictObject({
   environment: z.enum(MANIFEST_ENVIRONMENTS),
   appShortName: z.string().min(1).max(30),
@@ -259,10 +256,6 @@ export function validateManifest(options: BuildOptions): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const { environment } = options;
-
-  if (environment === 'production') {
-    errors.push(`blocked: ${PRODUCTION_PACKAGE_BLOCKED}`);
-  }
 
   const environmentFile = environmentFileSchema.safeParse(
     readJson(join(paths.manifestDir, 'environments', `${environment}.json`)),

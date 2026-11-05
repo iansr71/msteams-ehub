@@ -1,4 +1,5 @@
 export * from './auth.js';
+export * from './authorizationFilter.js';
 export * from './client.js';
 export * from './documents.js';
 export * from './errors.js';

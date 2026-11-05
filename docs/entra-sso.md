@@ -4,11 +4,10 @@ Phase 13 replaces the development mock identity with real users. Staff sign in o
 Microsoft account through Teams. After that, every question reaches the answer API with an Entra
 ID access token, and the API checks that token itself.
 
-**Production is still blocked.** The API can now tell _who_ is asking. It cannot yet tell _which
-courses_ that person may see: that comes from Moodle enrolments in phase 14. Until then a
-signed-in user is authorised for no courses, and every question gets the "No E-Hub access found"
-card. The exception is development, where `API_DEV_ENTRA_COURSE_IDS` grants a fixed set of test
-courses to every signed-in user.
+**Which courses** a signed-in user may ask about is decided from Moodle enrolments (phase 14,
+[authorization.md](authorization.md)). Without Moodle course authorisation configured, a
+signed-in user is authorised for no courses outside development, where `API_DEV_ENTRA_COURSE_IDS`
+can grant a fixed set of test courses to every signed-in user.
 
 ## How it works
 
@@ -137,7 +136,7 @@ Answer API:
 | `ENTRA_API_SCOPE`               | default `access_as_user`                                                       |
 | `ENTRA_CLOCK_TOLERANCE_SECONDS` | default 120                                                                    |
 | `ENTRA_AUTHORITY_HOST`          | default `https://login.microsoftonline.com` (change only for sovereign clouds) |
-| `API_DEV_ENTRA_COURSE_IDS`      | development only: test courses for every signed-in user, until phase 14        |
+| `API_DEV_ENTRA_COURSE_IDS`      | development only: test courses for every signed-in user without `MOODLE_TOKEN` |
 
 Bot: `TEAMS_SSO_CONNECTION_NAME=ehub-sso`, together with `TEAMS_BOT_CLIENT_ID` (the bot
 refuses to start with a connection name but no bot registration).
@@ -171,7 +170,8 @@ About 90 branch staff use Teams as guests on personal email addresses. For a gue
   Teams SSO for a custom org app;
 - whether Teams lets guests install it at all.
 
-Test this with one real guest account before rollout. Phase 14 maps users to Moodle accounts.
+Test this with one real guest account before rollout. Users are mapped to Moodle accounts by
+email or an explicit mapping (phase 14, [authorization.md](authorization.md)).
 The `email` and `upn` claims of guests differ from members' (a guest's `upn` looks like
 `name_gmail.com#EXT#@tenant.onmicrosoft.com`), so that mapping must not assume `upn` is an
 email address.
@@ -198,7 +198,6 @@ Assumed from Microsoft documentation, **not yet tested in the Skin Renewal tenan
 
 ## Limitations
 
-- No course access for real users until phase 14 (fail closed).
 - Held questions live in one process's memory. They are lost on restart, and running several
   bot instances needs shared state (phase 19).
 - No sign-out command. Tokens expire on their own (about an hour). Revoking a user in Entra

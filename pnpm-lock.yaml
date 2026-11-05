@@ -47,6 +47,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@ehub/moodle-client':
+        specifier: workspace:*
+        version: link:../../packages/moodle-client
       '@ehub/shared':
         specifier: workspace:*
         version: link:../../packages/shared

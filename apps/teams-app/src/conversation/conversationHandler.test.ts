@@ -204,6 +204,16 @@ describe('conversation handler', () => {
       false,
     ],
     [
+      new AnswerClientError('rejected', { status: 403, code: 'identity_not_mapped' }),
+      'Your account is not linked to E-Hub',
+      false,
+    ],
+    [
+      new AnswerClientError('rejected', { status: 503, code: 'authorization_unavailable' }),
+      'Course access cannot be checked',
+      true,
+    ],
+    [
       new AnswerClientError('rejected', { status: 503, code: 'authentication_not_configured' }),
       'Sign-in is not available',
       false,

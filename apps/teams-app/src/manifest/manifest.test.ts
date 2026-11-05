@@ -5,12 +5,7 @@ import { inflateRawSync } from 'node:zlib';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  PRODUCTION_PACKAGE_BLOCKED,
-  defaultPaths,
-  validateManifest,
-  type ManifestPaths,
-} from './manifestTool.js';
+import { defaultPaths, validateManifest, type ManifestPaths } from './manifestTool.js';
 import { buildPackage } from './packageApp.js';
 import { placeholderColorIcon, placeholderOutlineIcon } from './placeholderIcons.js';
 import { decodeRgbaPng, encodePng, readPngInfo } from './png.js';
@@ -76,9 +71,12 @@ describe('Teams manifest', () => {
     expect(result.warnings.join('\n')).toContain('placeholder icons');
   });
 
-  it('blocks production until course access from enrolments exists', () => {
+  it('builds the production manifest with the production name', () => {
     const result = validateManifest({ environment: 'production', env: VARIABLES });
-    expect(result.errors).toContain(`blocked: ${PRODUCTION_PACKAGE_BLOCKED}`);
+    expect(result.errors).toEqual([]);
+    expect(JSON.parse(result.files?.manifestJson ?? '{}')).toMatchObject({
+      name: { short: 'E-Hub Assistant' },
+    });
   });
 
   it('lists missing or invalid variables by name only', () => {

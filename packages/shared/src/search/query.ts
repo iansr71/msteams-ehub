@@ -3,13 +3,10 @@ import {
   SEMANTIC_CONFIGURATION_NAME,
   VECTOR_FIELD_NAME,
 } from './indexDefinition.js';
-import {
-  buildCourseFilter,
-  buildPrincipalFilter,
-  buildStringInFilter,
-  buildTenantFilter,
-  type SearchPrincipals,
-} from './odata.js';
+import { SearchAuthorizationFilterBuilder, SearchScopeError } from './authorizationFilter.js';
+import { buildStringInFilter, type SearchPrincipals } from './odata.js';
+
+export { SearchScopeError, type SearchScopeErrorCode } from './authorizationFilter.js';
 
 /*
  * Turns a search request into the REST body. Pure, so tests can check exactly what is sent.
@@ -37,7 +34,7 @@ export const MAX_QUERY_TEXT_CHARS = 1000;
 export interface SearchQuery {
   readonly tenantId: string;
   /**
-   * Courses the caller is authorised to read (from Moodle enrolments, phase 14). Required and
+   * Courses the caller is authorised to read (from Moodle enrolments). Required and
    * non-empty: a search can never be unscoped.
    */
   readonly authorizedCourseIds: readonly number[];
@@ -56,19 +53,6 @@ export interface SearchQuery {
   readonly vectorK?: number;
   /** Use semantic ranking when the index has it and `text` is given. Default true. */
   readonly semantic?: boolean;
-}
-
-export type SearchScopeErrorCode = 'empty_scope' | 'course_not_authorized' | 'invalid_query';
-
-/** The request cannot be run as asked. Thrown before any network traffic. */
-export class SearchScopeError extends Error {
-  readonly code: SearchScopeErrorCode;
-
-  constructor(code: SearchScopeErrorCode, message: string) {
-    super(message);
-    this.name = 'SearchScopeError';
-    this.code = code;
-  }
 }
 
 export interface SearchRequestPlan {
@@ -96,32 +80,20 @@ function boundedCount(value: number | undefined, fallback: number, what: string)
   return count;
 }
 
+const AUTHORIZATION_FILTER = new SearchAuthorizationFilterBuilder();
+
 export function buildSearchRequest(
   query: SearchQuery,
   options: SearchRequestOptions,
 ): SearchRequestPlan {
-  if (query.authorizedCourseIds.length === 0) {
-    throw new SearchScopeError('empty_scope', 'No authorised courses: the search was not run.');
-  }
-  const authorized = new Set(query.authorizedCourseIds);
-  let effective = authorized;
-  if (query.courseIds !== undefined) {
-    if (query.courseIds.length === 0) {
-      throw new SearchScopeError('invalid_query', 'An empty course selection was given.');
-    }
-    if (query.courseIds.some((id) => !authorized.has(id))) {
-      throw new SearchScopeError(
-        'course_not_authorized',
-        'A requested course is not in the authorised set.',
-      );
-    }
-    effective = new Set(query.courseIds);
-  }
-
-  const filters = [buildTenantFilter(query.tenantId), buildCourseFilter([...effective])];
-  if (query.principals !== undefined) {
-    filters.push(buildPrincipalFilter(query.principals));
-  }
+  const authorization = AUTHORIZATION_FILTER.build({
+    tenantId: query.tenantId,
+    authorizedCourseIds: query.authorizedCourseIds,
+    ...(query.courseIds === undefined ? {} : { selectedCourseIds: query.courseIds }),
+    ...(query.principals === undefined ? {} : { principals: query.principals }),
+  });
+  const effective = authorization.effectiveCourseIds;
+  const filters = [authorization.filter];
   if (query.resourceTypes !== undefined) {
     filters.push(buildStringInFilter('resourceType', query.resourceTypes, RESOURCE_TYPE_SET));
   }

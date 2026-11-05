@@ -1,7 +1,7 @@
 import { createLogger, type CommandContext } from '@ehub/shared';
 import { describe, expect, it } from 'vitest';
 
-import { PRODUCTION_BLOCKED_MESSAGE, createServeCommand } from './serveCommand.js';
+import { PRODUCTION_REQUIREMENTS_MESSAGE, createServeCommand } from './serveCommand.js';
 
 async function run(env: Record<string, string>): Promise<{ exitCode: number; stdout: string }> {
   const output: string[] = [];
@@ -18,10 +18,26 @@ async function run(env: Record<string, string>): Promise<{ exitCode: number; std
 }
 
 describe('pnpm api serve', () => {
-  it('refuses to run in production until enrolment-based access exists', async () => {
-    const result = await run({ NODE_ENV: 'production' });
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe(PRODUCTION_BLOCKED_MESSAGE);
+  it('refuses production without both Entra sign-in and Moodle course authorisation', async () => {
+    const entra = {
+      ENTRA_API_CLIENT_ID: '33333333-3333-4333-8333-333333333333',
+      ENTRA_ALLOWED_CLIENT_APP_IDS: '44444444-4444-4444-8444-444444444444',
+    };
+    for (const env of [
+      { NODE_ENV: 'production' },
+      { NODE_ENV: 'production', ...entra },
+      { NODE_ENV: 'production', MOODLE_TOKEN: 'moodle-token-0123456789' },
+      // A mock identity never substitutes for either.
+      {
+        NODE_ENV: 'production',
+        API_DEV_MOCK_IDENTITY: 'true',
+        MOODLE_TOKEN: 'moodle-token-0123456789',
+      },
+    ]) {
+      const result = await run(env);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe(PRODUCTION_REQUIREMENTS_MESSAGE);
+    }
   });
 
   it('refuses a mock identity without courses or with a real-looking user ID', async () => {

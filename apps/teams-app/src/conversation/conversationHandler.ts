@@ -84,6 +84,10 @@ function errorKindFor(error: AnswerClientError): ErrorKind {
         case 'no_authorized_courses':
         case 'course_not_authorized':
           return 'no_access';
+        case 'identity_not_mapped':
+          return 'not_linked';
+        case 'authorization_unavailable':
+          return 'access_check_failed';
         case 'unauthenticated':
           return 'sign_in_failed';
         case 'forbidden':

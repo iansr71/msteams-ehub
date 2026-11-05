@@ -480,11 +480,11 @@ export const apiServerConfigShape = {
   API_REQUEST_TIMEOUT_MS: boundedInteger(5_000, 300_000, API_SERVER_DEFAULTS.requestTimeoutMs),
   API_DEV_MOCK_IDENTITY: booleanFlag(false),
   API_DEV_MOCK_USER_ID: mockUserId.default(API_SERVER_DEFAULTS.mockUserId),
-  /** The mock user's "authorised" courses (until phase 14 reads Moodle enrolments). */
+  /** The mock user's "authorised" courses (development only). */
   API_DEV_MOCK_COURSE_IDS: syncCourseIdList.optional(),
   /**
-   * DEVELOPMENT ONLY: courses every signed-in Entra ID user may ask about, so SSO can be tested
-   * before phase 14 reads Moodle enrolments. Ignored outside NODE_ENV=development.
+   * DEVELOPMENT ONLY: courses every signed-in Entra ID user may ask about when Moodle course
+   * authorisation is not configured (no MOODLE_TOKEN). Ignored outside NODE_ENV=development.
    */
   API_DEV_ENTRA_COURSE_IDS: syncCourseIdList.optional(),
 };
@@ -542,6 +542,67 @@ export const entraAuthConfigShape = {
   ENTRA_CLOCK_TOLERANCE_SECONDS: boundedInteger(0, 300, ENTRA_DEFAULTS.clockToleranceSeconds),
   /** Sovereign clouds only. */
   ENTRA_AUTHORITY_HOST: serviceUrl({ httpsOnly: true }).default(ENTRA_DEFAULTS.authorityHost),
+};
+
+export const AUTHORIZATION_DEFAULTS = {
+  stateDir: '.ehub/identity-state',
+  cacheTtlSeconds: 300,
+  staleGraceSeconds: 0,
+  cacheMaxEntries: 5_000,
+  invalidationPollSeconds: 5,
+} as const;
+
+const UPN_USERNAME_RULES = ['none', 'upn', 'upn-local-part'] as const;
+export type UpnUsernameRule = (typeof UPN_USERNAME_RULES)[number];
+
+const domainList = z
+  .string()
+  .trim()
+  .transform((value) =>
+    value
+      .split(',')
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => part !== ''),
+  )
+  .pipe(
+    z
+      .array(
+        z.string().regex(/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/, {
+          message: 'Must be domain names such as skinrenewal.co.za.',
+        }),
+      )
+      .min(1)
+      .max(20),
+  );
+
+/*
+ * Moodle identity mapping and course authorisation (phase 14, docs/authorization.md). Which
+ * Moodle account a signed-in user is, and which courses they may ask about, is decided here
+ * from Moodle itself; nothing a client sends can widen it.
+ */
+export const authorizationConfigShape = {
+  /** Local store for explicit mappings, audit records and invalidations (development). */
+  IDENTITY_STATE_DIR: z.string().trim().min(1).max(500).default(AUTHORIZATION_DEFAULTS.stateDir),
+  /** Match the token's email claim to exactly one Moodle account. */
+  IDENTITY_EMAIL_MATCHING: booleanFlag(true),
+  /** How a member's UPN maps to a Moodle username; 'none' disables the rule. */
+  IDENTITY_UPN_USERNAME_RULE: z.enum(UPN_USERNAME_RULES).default('none'),
+  /** UPN domains the rule applies to; required unless the rule is 'none'. */
+  IDENTITY_UPN_DOMAINS: domainList.optional(),
+  /** How long a user's authorised courses are reused before Moodle is asked again. */
+  AUTHZ_CACHE_TTL_SECONDS: boundedInteger(10, 3_600, AUTHORIZATION_DEFAULTS.cacheTtlSeconds),
+  /**
+   * When Moodle cannot be reached, an expired entry may still be used for this long. 0 (the
+   * default) means never: authorisation that cannot be confirmed is refused.
+   */
+  AUTHZ_STALE_GRACE_SECONDS: boundedInteger(0, 900, AUTHORIZATION_DEFAULTS.staleGraceSeconds),
+  AUTHZ_CACHE_MAX_ENTRIES: boundedInteger(10, 100_000, AUTHORIZATION_DEFAULTS.cacheMaxEntries),
+  /** How often the API re-reads invalidations written by the admin commands. */
+  AUTHZ_INVALIDATION_POLL_SECONDS: boundedInteger(
+    1,
+    300,
+    AUTHORIZATION_DEFAULTS.invalidationPollSeconds,
+  ),
 };
 
 export const TEAMS_DEFAULTS = {
@@ -676,6 +737,17 @@ export const entraAuthConfigSchema = defineConfigSchema(entraAuthConfigShape).su
     }
   },
 );
+export const authorizationConfigSchema = defineConfigSchema(authorizationConfigShape).superRefine(
+  (config, ctx) => {
+    if (config.IDENTITY_UPN_USERNAME_RULE !== 'none' && config.IDENTITY_UPN_DOMAINS === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['IDENTITY_UPN_DOMAINS'],
+        message: 'Required unless IDENTITY_UPN_USERNAME_RULE is none.',
+      });
+    }
+  },
+);
 export const embeddingConfigSchema = defineConfigSchema(embeddingConfigShape);
 export const chatConfigSchema = defineConfigSchema(chatConfigShape);
 export const syncConfigSchema = defineConfigSchema(syncConfigShape).superRefine((config, ctx) => {
@@ -741,6 +813,7 @@ export const applicationConfigSchema = defineConfigSchema({
   ...chatConfigShape,
   ...syncConfigShape,
   ...apiServerConfigShape,
+  ...authorizationConfigShape,
   ENTRA_ALLOWED_TENANT_IDS: entraAuthConfigShape.ENTRA_ALLOWED_TENANT_IDS,
   ENTRA_API_CLIENT_ID: entraAuthConfigShape.ENTRA_API_CLIENT_ID.optional(),
   ENTRA_API_APP_ID_URI: entraAuthConfigShape.ENTRA_API_APP_ID_URI,
@@ -773,6 +846,7 @@ export type ApiServerConfig = z.output<typeof apiServerConfigSchema>;
 export type TeamsConfig = z.output<typeof teamsConfigSchema>;
 export type TeamsManifestConfig = z.output<typeof teamsManifestConfigSchema>;
 export type EntraAuthConfig = z.output<typeof entraAuthConfigSchema>;
+export type AuthorizationConfig = z.output<typeof authorizationConfigSchema>;
 export type ChunkingConfig = z.output<typeof chunkingConfigSchema>;
 export type ObservabilityConfig = z.output<typeof observabilityConfigSchema>;
 export type ApplicationConfig = z.output<typeof applicationConfigSchema>;
@@ -794,6 +868,7 @@ export const CONFIG_FEATURES = {
   teams: teamsConfigSchema,
   teamsManifest: teamsManifestConfigSchema,
   entraAuth: entraAuthConfigSchema,
+  authorization: authorizationConfigSchema,
   observability: observabilityConfigSchema,
 } as const;
 
@@ -816,5 +891,6 @@ export const CONFIG_FEATURE_VARIABLES: Readonly<Record<ConfigFeature, readonly s
   teams: Object.keys(teamsConfigShape),
   teamsManifest: Object.keys(teamsManifestConfigShape),
   entraAuth: Object.keys(entraAuthConfigShape),
+  authorization: Object.keys(authorizationConfigShape),
   observability: Object.keys(observabilityConfigShape),
 };

@@ -25,8 +25,8 @@ import {
 
 export const SERVICE_NAME = 'ehub-teams-app';
 
-export const PRODUCTION_BLOCKED_MESSAGE =
-  'The Teams app cannot run in production yet: course access from Moodle enrolments (phase 14) is required before real users can be authorised.';
+export const PRODUCTION_REQUIREMENTS_MESSAGE =
+  'In production the Teams app needs its bot registration (TEAMS_BOT_CLIENT_ID) and single sign-on (TEAMS_SSO_CONNECTION_NAME): see docs/entra-sso.md.';
 
 export class TeamsStartupError extends Error {
   constructor(message: string) {
@@ -58,18 +58,22 @@ export interface RunningTeamsServer {
 }
 
 /**
- * Starts the bot. Refuses production (no course authorisation yet), refuses to run with
- * neither bot credentials nor the explicit development opt-in for unsigned requests, and never holds Moodle or Azure
- * service credentials: answers come from the answer API.
+ * Starts the bot. Refuses production without bot credentials and single sign-on, refuses to
+ * run with neither bot credentials nor the explicit development opt-in for unsigned requests,
+ * and never holds Moodle or Azure service credentials: answers come from the answer API.
  */
 export async function startTeamsServer(
   dependencies: TeamsServerDependencies,
 ): Promise<RunningTeamsServer> {
-  // Checked before anything else, so no configuration can make production start.
-  if (dependencies.env['NODE_ENV'] === 'production') {
-    throw new TeamsStartupError(PRODUCTION_BLOCKED_MESSAGE);
-  }
   const config = loadConfig(teamsConfigSchema, dependencies.env);
+  // In production only real users: verified Teams requests and SSO, never a test identity.
+  if (
+    config.NODE_ENV === 'production' &&
+    (config.TEAMS_BOT_CLIENT_ID === undefined ||
+      (config.TEAMS_SSO_CONNECTION_NAME === undefined && dependencies.sso === undefined))
+  ) {
+    throw new TeamsStartupError(PRODUCTION_REQUIREMENTS_MESSAGE);
+  }
   const { logger } = dependencies;
   const development = config.NODE_ENV === 'development';
   // Development switches are turned off automatically elsewhere, so a stray variable is harmless.

@@ -362,8 +362,8 @@ export function createRetrieveCommand(
         const result = await service.retrieve({
           question: args.question,
           tenantId,
-          // Development command: the operator states the authorised courses. In the app they
-          // come from the user's Moodle enrolments (phase 14).
+          // Operator command: the operator states the authorised courses. In the app they
+          // come from the user's Moodle enrolments (docs/authorization.md).
           authorizedCourseIds: args['course-id'],
           ...(args['resource-type'] === undefined ? {} : { resourceTypes: args['resource-type'] }),
           ...(args['top-k'] === undefined ? {} : { topK: args['top-k'] }),

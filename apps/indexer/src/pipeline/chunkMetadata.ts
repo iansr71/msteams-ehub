@@ -12,8 +12,9 @@ export const CHUNKER_VERSION = 'structure-aware@1.0.0';
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/);
 
 /**
- * Who may see a chunk. Populated from Moodle enrolments in phase 14. Empty lists mean nobody:
- * retrieval must treat a chunk with no allowed users or groups as inaccessible (fail closed).
+ * Optional per-user and per-group access lists. Not used: access is decided per course, from
+ * Moodle enrolments, by the courseId filter on every query (docs/authorization.md), so these are
+ * written empty. If they are ever populated, queries must add the principal filter too.
  */
 export const chunkAccessSchema = z.object({
   allowedUserIds: z.array(identifier).max(50_000),

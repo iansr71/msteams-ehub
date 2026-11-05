@@ -7,7 +7,6 @@ import { z } from 'zod';
 
 import {
   MANIFEST_ENVIRONMENTS,
-  PRODUCTION_PACKAGE_BLOCKED,
   defaultPaths,
   validateManifest,
   type ValidationResult,
@@ -60,10 +59,6 @@ function main(argv: readonly string[]): number {
     return 2;
   }
   const options = parseCommandArgs(rest, { env: 'string', json: 'boolean' }, args);
-  if (command === 'package' && options.env === 'production') {
-    write(PRODUCTION_PACKAGE_BLOCKED);
-    return 1;
-  }
   const result = validateManifest({ environment: options.env, env: process.env });
   if (options.json === true) {
     write(

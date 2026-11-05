@@ -11,6 +11,9 @@
   "references": [
     {
       "path": "../../packages/shared/tsconfig.build.json"
+    },
+    {
+      "path": "../../packages/moodle-client/tsconfig.build.json"
     }
   ]
 }

@@ -88,6 +88,8 @@ export const API_ERROR_CODES = [
   'authentication_unavailable',
   'no_authorized_courses',
   'course_not_authorized',
+  'identity_not_mapped',
+  'authorization_unavailable',
   'rate_limited',
   'timeout',
   'internal_error',

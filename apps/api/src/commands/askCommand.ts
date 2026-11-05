@@ -176,8 +176,8 @@ export function createAskCommand(dependencies: AskCommandDependencies): CommandD
             user: {
               tenantId,
               userId: CLI_USER_ID,
-              // Development command: the operator states the authorised courses. In the app
-              // they come from the user's Moodle enrolments (phase 14).
+              // Operator command: the operator states the authorised courses. In the app they
+              // come from the user's Moodle enrolments (docs/authorization.md).
               authorizedCourseIds: args['course-id'],
               ...(args['selected-course-id'] === undefined
                 ? {}

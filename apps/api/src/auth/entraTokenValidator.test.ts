@@ -63,7 +63,9 @@ describe('Entra access token validation', () => {
         tenantId: TENANT,
         objectId: USER_OID,
         userPrincipalName: 'thandi@skinrenewal.example',
+        userPrincipalNameSource: 'preferred_username',
         email: 'thandi@skinrenewal.example',
+        emailAsIssued: 'Thandi@SkinRenewal.example',
         displayName: 'Thandi Test',
         roles: ['E-Hub.Trainer'],
         authentication: {
@@ -91,6 +93,7 @@ describe('Entra access token validation', () => {
     expect(result.ok && result.identity.userPrincipalName).toBe(
       'thandi_gmail.com#EXT#@skinrenewal.onmicrosoft.com',
     );
+    expect(result.ok && result.identity.userPrincipalNameSource).toBe('upn');
   });
 
   it('accepts the App ID URI as audience and upper-case GUIDs', async () => {

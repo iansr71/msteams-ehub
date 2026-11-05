@@ -48,8 +48,21 @@ Assign the role with the narrowest scope that works:
 - **Only if required:** _Site administration → Users → Permissions → Assign system roles_.
   This exposes every course on the site.
 
-`moodle/user:viewhiddendetails` is needed only if users' e-mail addresses are hidden and
-e-mail identity mapping (phase 14) is used. Grant it only then.
+**Identity mapping (phase 14)** looks users up in their own user context, which a category
+assignment does not reach. Create a second role, e.g. `E-Hub Assistant (identity lookup)`, that
+can be assigned in the **System** context only, and assign it to the service account at system
+level with only:
+
+- `moodle/user:viewdetails`;
+- `moodle/site:viewuseridentity`, and add **email** to _Site administration → Users →
+  Permissions → User policies → Show user identity_, so the service account can see emails
+  (`core_user_get_users_by_field` returns no match for an email it cannot see);
+- `moodle/user:viewhiddendetails` only if `suspended` is listed in _Hide user fields_;
+- `moodle/user:viewalldetails` only if a UPN username rule is used (usernames are returned only
+  with it).
+
+These come from Moodle's source, not from testing on your site: confirm with
+`pnpm identity resolve` (docs/authorization.md).
 
 ## 4. Create the external service
 
@@ -78,8 +91,8 @@ table identical to it, and `moodle:ping` checks the live service against it.
 | `core_webservice_get_site_info` | `moodle:ping`                               | none                                                     | Connectivity, service-account identity, function check      |
 | `core_course_get_courses`       | `moodle:courses`, `moodle:inspect`          | `options[ids][]` (optional)                              | Course discovery and course metadata                        |
 | `core_course_get_contents`      | `moodle:inspect`, indexing (phase 4 onward) | `courseid`, optional `options[excludecontents]`          | Sections, activities, Page/Book structure and file metadata |
-| `core_enrol_get_enrolled_users` | Authorisation (phase 14)                    | `courseid`, `options[onlyactive/limitfrom/limitnumber]`  | Enrolment checks for course authorisation                   |
-| `core_enrol_get_users_courses`  | Authorisation (phase 14)                    | `userid`, `returnusercount=0`                            | A user's enrolled courses                                   |
+| `core_enrol_get_enrolled_users` | Not called yet (reserved)                   | `courseid`, `options[onlyactive/limitfrom/limitnumber]`  | Enrolment checks for course authorisation                   |
+| `core_enrol_get_users_courses`  | Course authorisation (phase 14)             | `userid`, `returnusercount=0`                            | A user's enrolled courses                                   |
 | `core_user_get_users_by_field`  | Identity mapping (phase 14)                 | `field` (`id`/`idnumber`/`username`/`email`), `values[]` | Map an Entra ID user to a Moodle user                       |
 
 <!-- moodle-functions:end -->

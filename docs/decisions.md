@@ -213,3 +213,38 @@ that real identity exists, a stray switch in a test or staging environment is sw
 warning, and the service runs with real sign-in. Both outcomes are fail-closed; turning off is
 less fragile for deployments that share variable sets. Production still refuses to start until
 phase 14 limits users to their enrolled courses.
+
+## Course authorisation comes from Moodle, before retrieval, and is cached briefly (phase 14)
+
+The API maps each validated Entra user to one Moodle account and uses that account's active
+enrolments in visible courses as the course filter inside the search request. It never asks the
+model and never filters results afterwards; the search client's check that every hit lies in the
+set is a second line, not the control. Results are cached (5 minutes by default) because each
+question would otherwise cost two Moodle calls. Revocation is by TTL, explicit invalidation and
+a scheduled enrolment sync. A stale grant during a Moodle outage is off by default: an outage
+refuses questions rather than answering from an old view.
+
+## Identity mapping: explicit, then unique email, then an opt-in UPN rule; ambiguity is denied (phase 14)
+
+Explicit administrator mappings come first and, if they fail, nothing else is tried, so a
+mapping cannot silently fall through to a different account. Email matching is accepted because
+only Skin Renewal's tenant is trusted and its email values are set by administrators or by guest
+invitation, not by users. It must match exactly one active Moodle account. Guests (branch staff
+on personal addresses) can only be matched by email or an explicit mapping; their UPNs are
+never treated as usernames.
+
+## No separate allowed-courses field in the index (phase 14)
+
+Prompt 14 asks for allowed-course metadata on indexed content. Every chunk already carries a
+filterable `courseId` from Moodle, and each chunk belongs to exactly one course, so the filter
+uses it directly. A second `allowedCourseIds` field would hold the same value. Existing chunks
+would lack it until the whole corpus is re-chunked and re-embedded (the sync sees no change in
+source files), and a filter on it would hide all current content until then. A real need for it
+would be content shared across courses, which Moodle enrolments do not express.
+
+## Production gates replaced by configuration requirements (phase 14)
+
+The blanket production refusals in the API, the bot and `teams:package` existed because there
+was no real identity (phase 13) and no course authorisation (phase 14). They are replaced by
+checks that production has Entra sign-in and Moodle authorisation (API) and bot credentials and
+SSO (bot). Security hardening (phase 17) and the Azure deployment (phase 19) are still to come.

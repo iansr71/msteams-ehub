@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { answer } from '../cards/__fixtures__/answers.js';
 import {
-  PRODUCTION_BLOCKED_MESSAGE,
+  PRODUCTION_REQUIREMENTS_MESSAGE,
   TeamsStartupError,
   startTeamsServer,
   type RunningTeamsServer,
@@ -232,7 +232,7 @@ describe('Teams bot with single sign-on', () => {
     await sso.callbacks.completed(ctx);
     await settle(server);
     expect(apiCalls).toHaveLength(1);
-    expect(apiCalls[0]?.headers.authorization).toBe(`Bearer ${USER_TOKEN}`);
+    expect(apiCalls[0]?.headers['authorization']).toBe(`Bearer ${USER_TOKEN}`);
     expect(apiCalls[0]?.headers['x-ehub-mock-identity']).toBeUndefined();
     // Teams sender fields never stand in for identity.
     expect(JSON.stringify(apiCalls[0]?.body)).not.toContain('beef');
@@ -247,7 +247,7 @@ describe('Teams bot with single sign-on', () => {
     await deliver(server, activity());
     await settle(server);
     expect(sso.starts).toBe(0);
-    expect(apiCalls[0]?.headers.authorization).toBe(`Bearer ${USER_TOKEN}`);
+    expect(apiCalls[0]?.headers['authorization']).toBe(`Bearer ${USER_TOKEN}`);
   });
 
   it('reports a failed sign-in', async () => {
@@ -451,10 +451,26 @@ describe('Teams bot over HTTP', () => {
     expect(logs.join('\n')).not.toContain('local-dev-secret-value');
   });
 
-  it('refuses to start in production, or with no way to verify requests', async () => {
-    await expect(
-      startTeamsServer({ env: { NODE_ENV: 'production' }, logger, port: 0 }),
-    ).rejects.toThrow(PRODUCTION_BLOCKED_MESSAGE);
+  it('refuses production without bot credentials and SSO, or with no way to verify requests', async () => {
+    const bot = {
+      TEAMS_BOT_CLIENT_ID: '00000000-0000-4000-8000-0000000000b0',
+      TEAMS_API_BASE_URL: 'https://answers.example.com',
+    };
+    for (const env of [
+      { NODE_ENV: 'production', TEAMS_API_BASE_URL: 'https://answers.example.com' },
+      { NODE_ENV: 'production', ...bot },
+      {
+        NODE_ENV: 'production',
+        TEAMS_API_BASE_URL: 'https://answers.example.com',
+        TEAMS_SSO_CONNECTION_NAME: 'ehub-sso',
+        TEAMS_DEV_MOCK_IDENTITY: 'true',
+        TEAMS_DEV_ALLOW_UNAUTHENTICATED: 'true',
+      },
+    ]) {
+      await expect(startTeamsServer({ env, logger, port: 0 })).rejects.toThrow(
+        PRODUCTION_REQUIREMENTS_MESSAGE,
+      );
+    }
     await expect(
       startTeamsServer({ env: { NODE_ENV: 'development' }, logger, port: 0 }),
     ).rejects.toBeInstanceOf(TeamsStartupError);

@@ -5,9 +5,10 @@ chat with a bot, on Teams desktop and web (and mobile, which renders the same ca
 channels, no group chats, no notifications, no grades or assignments.
 
 **Sign-in:** users sign in with Microsoft Entra ID single sign-on (phase 13, see
-[entra-sso.md](entra-sso.md)). **Production is still blocked:** until enrolment-based course
-access (phase 14) limits each user to their own courses, the bot and the answer API refuse to
-start with `NODE_ENV=production`, and `teams:package` refuses to build a production package.
+[entra-sso.md](entra-sso.md)), and the answer API limits each user to the Moodle courses they are
+enrolled in (phase 14, see [authorization.md](authorization.md)). With `NODE_ENV=production` the
+bot starts only with its bot registration and SSO configured, and the API only with Entra
+sign-in and Moodle course authorisation configured.
 
 ## How it fits together
 
@@ -85,7 +86,7 @@ the administration UI (phase 15).
   banner. When SSO is configured, the bot ignores its mock switch.
 - The mock and unauthenticated switches work only with `NODE_ENV=development`; elsewhere they
   are switched off automatically with a logged warning, the classes that implement them refuse
-  to be constructed, and both services refuse to start in production at all.
+  to be constructed, and in production both services start only with real sign-in configured.
 - With no identity configured, the bot answers "Sign-in is not available" and the API answers
   503 `authentication_not_configured`: fail closed.
 
@@ -110,7 +111,7 @@ the administration UI (phase 15).
 apps/teams-app/manifest/
   manifest.template.json        manifest v1.24, ${{VARIABLE}} placeholders
   environments/development.json name "E-Hub Assistant (Dev)", accent colour
-  environments/production.json  name "E-Hub Assistant" (packaging blocked until phase 14)
+  environments/production.json  name "E-Hub Assistant"
   color.png, outline.png        PLACEHOLDER icons
 ```
 
@@ -128,7 +129,7 @@ Variables (environment or `.env`; not secrets, but environment-specific):
 
 ```bash
 pnpm teams:validate                  # development; exit 1 on any problem
-pnpm teams:validate --env production # reports that production is blocked until phase 14
+pnpm teams:validate --env production # the production manifest
 pnpm teams:package                   # apps/teams-app/build/ehub-assistant-development-<version>.zip
 ```
 
@@ -232,28 +233,28 @@ agentsplayground -e http://localhost:3978/api/messages -c msteams
 
 ## Configuration
 
-| Variable                               | Default                 | Notes                                                        |
-| -------------------------------------- | ----------------------- | ------------------------------------------------------------ |
-| `TEAMS_BOT_PORT`                       | 3978                    |                                                              |
-| `TEAMS_BOT_CLIENT_ID`                  | none                    | Required unless unsigned requests are allowed                |
-| `TEAMS_BOT_CLIENT_SECRET`              | none                    | Local development only; Azure uses Managed Identity          |
-| `TEAMS_BOT_TENANT_ID`                  | none                    | Single-tenant bot registration                               |
-| `TEAMS_API_BASE_URL`                   | `http://127.0.0.1:3000` | Must be https in production                                  |
-| `TEAMS_API_TIMEOUT_MS`                 | 60000                   | Per question                                                 |
-| `TEAMS_DEV_MOCK_IDENTITY`              | false                   | Development only                                             |
-| `TEAMS_DEV_MOCK_USER_ID`               | `dev-mock-user`         | Must match `API_DEV_MOCK_USER_ID`                            |
-| `TEAMS_DEV_ALLOW_UNAUTHENTICATED`      | false                   | Development only (Agents Playground)                         |
-| `TEAMS_ALLOWED_LINK_HOSTS`             | any https host          | e.g. the E-Hub host name                                     |
-| `TEAMS_MAX_CONCURRENT_QUESTIONS`       | 8                       | Further questions get a "busy" card                          |
-| `TEAMS_CARD_MAX_BYTES`                 | 24000                   | 8000-28000                                                   |
-| `API_HOST`                             | `127.0.0.1`             | Answer API interface                                         |
-| `PORT`                                 | 3000                    | Answer API port                                              |
-| `API_REQUEST_TIMEOUT_MS`               | 90000                   | Per answer, inside the API                                   |
-| `API_DEV_MOCK_IDENTITY`                | false                   | Development only                                             |
-| `API_DEV_MOCK_USER_ID`                 | `dev-mock-user`         |                                                              |
-| `API_DEV_MOCK_COURSE_IDS`              | none                    | Required with the mock identity                              |
-| `API_DEV_ENTRA_COURSE_IDS`             | none                    | Development only; courses for signed-in users until phase 14 |
-| `ENTRA_*`, `TEAMS_SSO_CONNECTION_NAME` | none                    | Single sign-on; see [entra-sso.md](entra-sso.md)             |
+| Variable                               | Default                 | Notes                                                              |
+| -------------------------------------- | ----------------------- | ------------------------------------------------------------------ |
+| `TEAMS_BOT_PORT`                       | 3978                    |                                                                    |
+| `TEAMS_BOT_CLIENT_ID`                  | none                    | Required unless unsigned requests are allowed                      |
+| `TEAMS_BOT_CLIENT_SECRET`              | none                    | Local development only; Azure uses Managed Identity                |
+| `TEAMS_BOT_TENANT_ID`                  | none                    | Single-tenant bot registration                                     |
+| `TEAMS_API_BASE_URL`                   | `http://127.0.0.1:3000` | Must be https in production                                        |
+| `TEAMS_API_TIMEOUT_MS`                 | 60000                   | Per question                                                       |
+| `TEAMS_DEV_MOCK_IDENTITY`              | false                   | Development only                                                   |
+| `TEAMS_DEV_MOCK_USER_ID`               | `dev-mock-user`         | Must match `API_DEV_MOCK_USER_ID`                                  |
+| `TEAMS_DEV_ALLOW_UNAUTHENTICATED`      | false                   | Development only (Agents Playground)                               |
+| `TEAMS_ALLOWED_LINK_HOSTS`             | any https host          | e.g. the E-Hub host name                                           |
+| `TEAMS_MAX_CONCURRENT_QUESTIONS`       | 8                       | Further questions get a "busy" card                                |
+| `TEAMS_CARD_MAX_BYTES`                 | 24000                   | 8000-28000                                                         |
+| `API_HOST`                             | `127.0.0.1`             | Answer API interface                                               |
+| `PORT`                                 | 3000                    | Answer API port                                                    |
+| `API_REQUEST_TIMEOUT_MS`               | 90000                   | Per answer, inside the API                                         |
+| `API_DEV_MOCK_IDENTITY`                | false                   | Development only                                                   |
+| `API_DEV_MOCK_USER_ID`                 | `dev-mock-user`         |                                                                    |
+| `API_DEV_MOCK_COURSE_IDS`              | none                    | Required with the mock identity                                    |
+| `API_DEV_ENTRA_COURSE_IDS`             | none                    | Development only; courses for signed-in users without MOODLE_TOKEN |
+| `ENTRA_*`, `TEAMS_SSO_CONNECTION_NAME` | none                    | Single sign-on; see [entra-sso.md](entra-sso.md)                   |
 
 The SDK also reads `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID` and
 `DANGEROUSLY_ALLOW_UNAUTHENTICATED_REQUESTS` when options are not passed. The bot always passes
@@ -264,8 +265,8 @@ identity is configured). It is unauthenticated and reveals no configuration valu
 
 ## Known limitations
 
-- No enrolment-based course access until phase 14: signed-in users see no courses outside
-  development.
+- Course access is per course (Moodle enrolments); activity restrictions and groups inside a
+  course are not applied ([authorization.md](authorization.md)).
 - **Guest users.** Branch staff use Teams as guests on personal email addresses. Whether guests
   can install the app and complete SSO has not been verified in the tenant; see
   [entra-sso.md](entra-sso.md#guest-users).

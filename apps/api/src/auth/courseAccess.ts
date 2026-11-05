@@ -1,9 +1,9 @@
 import type { AuthenticatedCaller } from '../http/authentication.js';
 
 /**
- * Which Moodle courses a caller may ask about. Phase 14 implements this from Moodle
- * enrolments; until then real users get no courses (fail closed) unless a development-only
- * course list is configured.
+ * Which Moodle courses a caller may ask about. AuthorizedCourseService implements it from Moodle
+ * enrolments. InterimCourseAccess is the fallback without Moodle configuration: real users get
+ * no courses (fail closed) unless a development-only course list is configured.
  */
 export interface CourseAccessResolver {
   readonly mode: string;

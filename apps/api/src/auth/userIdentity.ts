@@ -15,8 +15,12 @@ export const userIdentitySchema = z.strictObject({
   tenantId: lowerGuid,
   objectId: lowerGuid,
   userPrincipalName: boundedText.optional(),
+  /** Which claim userPrincipalName came from; only `upn` is used for Moodle username rules. */
+  userPrincipalNameSource: z.enum(['upn', 'preferred_username']).optional(),
   /** Lower-cased; only from the `email` claim (an optional claim in the API registration). */
   email: z.email().max(256).optional(),
+  /** The email claim exactly as issued, for exact matching in case-sensitive Moodle databases. */
+  emailAsIssued: boundedText.optional(),
   displayName: boundedText.optional(),
   /** App roles assigned to the user for the API (`roles` claim), if any. */
   roles: z.array(z.string().regex(/^[A-Za-z0-9._-]{1,120}$/)).max(50),

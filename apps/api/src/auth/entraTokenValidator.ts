@@ -247,14 +247,23 @@ export class EntraTokenValidator {
       return reject('missing_claims');
     }
 
-    const email = bounded(claims.email)?.toLowerCase();
+    const emailAsIssued = bounded(claims.email);
+    const email = emailAsIssued?.toLowerCase();
+    const upn = bounded(claims.upn);
+    const principalName = upn ?? bounded(claims.preferred_username);
     const identity = userIdentitySchema.safeParse({
       tenantId,
       objectId,
-      ...(bounded(claims.upn ?? claims.preferred_username) === undefined
+      ...(principalName === undefined
         ? {}
-        : { userPrincipalName: bounded(claims.upn ?? claims.preferred_username) }),
-      ...(email !== undefined && z.email().safeParse(email).success ? { email } : {}),
+        : {
+            userPrincipalName: principalName,
+            // preferred_username is display-only per Microsoft; the UPN mapping rule needs `upn`.
+            userPrincipalNameSource: upn === undefined ? 'preferred_username' : 'upn',
+          }),
+      ...(email !== undefined && emailAsIssued !== undefined && z.email().safeParse(email).success
+        ? { email, emailAsIssued }
+        : {}),
       ...(bounded(claims.name) === undefined ? {} : { displayName: bounded(claims.name) }),
       roles: (claims.roles ?? [])
         .filter((role) => /^[A-Za-z0-9._-]{1,120}$/.test(role))

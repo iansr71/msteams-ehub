@@ -11,11 +11,18 @@ import {
   type CommandDefinition,
   type EnvironmentSource,
 } from '@ehub/shared';
+import type { FetchFn } from '@ehub/moodle-client';
 import type { JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 
 import { startApiServer, type RunningApiServer } from '../http/apiServer.js';
-import { InterimCourseAccess } from '../auth/courseAccess.js';
+import { InterimCourseAccess, type CourseAccessResolver } from '../auth/courseAccess.js';
+import {
+  createAuthorizationServices,
+  moodleAuthorizationConfigured,
+  type AuthorizationMoodle,
+} from '../authorization/factory.js';
+import type { IdentityMappingRepository } from '../authorization/identityMappingRepository.js';
 import { EntraTokenValidator, entraSigningKeys } from '../auth/entraTokenValidator.js';
 import { createAuthenticator } from '../http/authentication.js';
 import { LoggingFeedbackRecorder, type FeedbackRecorder } from '../http/feedbackRecorder.js';
@@ -29,6 +36,12 @@ export interface ServeCommandDependencies extends AskCommandDependencies {
   readonly waitForShutdown?: (server: RunningApiServer) => Promise<void>;
   /** For tests: signing keys instead of the tenant's published JWKS. */
   readonly signingKeys?: JWTVerifyGetKey;
+  /** For tests: Moodle user and enrolment lookups instead of the MOODLE_* client. */
+  readonly authorizationMoodle?: AuthorizationMoodle;
+  /** For tests: the identity store instead of the file store under IDENTITY_STATE_DIR. */
+  readonly identityRepository?: IdentityMappingRepository;
+  /** For tests: the HTTP transport of the real Moodle client. */
+  readonly moodleFetch?: FetchFn;
 }
 
 /** Entra validation is configured when the API's registration is named. */
@@ -42,8 +55,8 @@ function entraConfigured(env: EnvironmentSource): boolean {
 
 const serveArgs = z.object({}).strict();
 
-export const PRODUCTION_BLOCKED_MESSAGE =
-  'The answer API cannot run in production yet: course access from Moodle enrolments (phase 14) is required before real users can be authorised.';
+export const PRODUCTION_REQUIREMENTS_MESSAGE =
+  'In production the answer API needs Entra ID sign-in (ENTRA_API_CLIENT_ID, ENTRA_ALLOWED_CLIENT_APP_IDS) and Moodle course authorisation (MOODLE_TOKEN): see docs/authorization.md.';
 
 function defaultWaitForShutdown(): Promise<void> {
   return new Promise((resolve) => {
@@ -59,23 +72,42 @@ function defaultWaitForShutdown(): Promise<void> {
 
 /**
  * `pnpm api serve`: the HTTP answer API for the Teams app. Callers prove who they are with an
- * Entra ID access token (or, in development only, the mock identity). Production is refused
- * until phase 14 limits users to their enrolled courses; without an identity every question is
- * refused (fail closed).
+ * Entra ID access token (or, in development only, the mock identity), and may ask only about
+ * their own Moodle courses, decided from Moodle enrolments before retrieval. Production refuses
+ * to start without both; without an identity every question is refused (fail closed).
  */
 export function createServeCommand(dependencies: ServeCommandDependencies): CommandDefinition {
   return {
     description:
-      'Run the HTTP answer API (development only until enrolment-based access; see docs/entra-sso.md).',
+      'Run the HTTP answer API (Entra ID sign-in, Moodle course authorisation; see docs/authorization.md).',
     run: (context) =>
       withErrorHandling(
         context,
         'Answer API',
         async () => {
           parseCommandArgs(context.args, {}, serveArgs);
-          // Checked before anything else, so no configuration can make production start.
-          if (dependencies.env['NODE_ENV'] === 'production') {
-            context.stdout(PRODUCTION_BLOCKED_MESSAGE);
+          const authorizationDependencies = {
+            env: dependencies.env,
+            ...(dependencies.authorizationMoodle === undefined
+              ? {}
+              : { moodle: dependencies.authorizationMoodle }),
+            ...(dependencies.identityRepository === undefined
+              ? {}
+              : { identityRepository: dependencies.identityRepository }),
+            ...(dependencies.moodleFetch === undefined
+              ? {}
+              : { moodleFetch: dependencies.moodleFetch }),
+          };
+          // Checked before loading anything else: production never starts without real
+          // identity and real course authorisation.
+          if (
+            cleanEnvironment(dependencies.env)['NODE_ENV'] === 'production' &&
+            !(
+              entraConfigured(dependencies.env) &&
+              moodleAuthorizationConfigured(authorizationDependencies)
+            )
+          ) {
+            context.stdout(PRODUCTION_REQUIREMENTS_MESSAGE);
             return EXIT_FAILURE;
           }
           const config = loadConfig(apiServerConfigSchema, dependencies.env);
@@ -112,11 +144,17 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
             },
             context.logger,
           );
-          const courseAccess = new InterimCourseAccess({
-            nodeEnv: config.NODE_ENV,
-            mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
-            devEntraCourseIds: config.API_DEV_ENTRA_COURSE_IDS ?? [],
-          });
+          const courseAccess: CourseAccessResolver = moodleAuthorizationConfigured(
+            authorizationDependencies,
+          )
+            ? createAuthorizationServices(authorizationDependencies, context.logger, {
+                mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
+              }).courses
+            : new InterimCourseAccess({
+                nodeEnv: config.NODE_ENV,
+                mockCourseIds: config.API_DEV_MOCK_COURSE_IDS ?? [],
+                devEntraCourseIds: config.API_DEV_ENTRA_COURSE_IDS ?? [],
+              });
           const server = await startApiServer(
             {
               answerer: rag,
@@ -143,9 +181,11 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
           if (authenticator.mode.includes('entra')) {
             lines.push(
               `  Entra ID sign-in: tenant ${entra?.AZURE_TENANT_ID ?? ''}, scope ${entra?.ENTRA_API_SCOPE ?? ''}`,
-              courseAccess.mode === 'dev-static'
-                ? `  DEVELOPMENT COURSE ACCESS for every signed-in user: ${(config.API_DEV_ENTRA_COURSE_IDS ?? []).join(', ')}`
-                : '  No course access source yet (phase 14): signed-in users are refused with "no access".',
+              courseAccess.mode === 'moodle-enrolments'
+                ? '  Course access: Moodle enrolments (identity mapping and enrolments, cached briefly).'
+                : courseAccess.mode === 'dev-static'
+                  ? `  DEVELOPMENT COURSE ACCESS for every signed-in user: ${(config.API_DEV_ENTRA_COURSE_IDS ?? []).join(', ')}`
+                  : '  No course access source (MOODLE_TOKEN not set): signed-in users are refused with "no access".',
             );
           }
           if (authenticator.mode.includes('dev-mock')) {
