@@ -13,7 +13,8 @@ user's Moodle course enrolments.
 > courses they are enrolled in (docs/authorization.md, `pnpm identity …`, `pnpm authorization …`).
 > Administrators use `/admin` on the API (docs/admin.md), by Entra app role. Traces, metrics,
 > `/health/live` and `/health/ready`, `pnpm diagnose` and the recommended alerts are in
-> docs/observability.md.
+> docs/observability.md. Azure deployment (Bicep, Container Apps, scripts for deploy, what-if,
+> rollback and Teams packaging) is in docs/infrastructure.md.
 
 ## Repository layout
 
@@ -26,7 +27,10 @@ packages/
   shared/         Zod configuration, structured logger, redaction, correlation IDs, CLI/health helpers
   moodle-client/  Typed Moodle REST client and safe file downloader
 infrastructure/
-  bicep/          Azure infrastructure as code (phase 19)
+  bicep/          Azure infrastructure as code: main.bicep, modules/, parameters/ (dev, test, prod)
+  scripts/        validate, what-if, deploy, rollback, configure-bot-sso, package-teams-app (.sh and .ps1)
+  environments/   <env>.env.example; real <env>.env files are not committed
+Dockerfile        One image for the API, the bot and the indexer jobs
 tests/
   integration/    Cross-package tests (no real Azure or Moodle calls)
   security/       Security regression tests
@@ -89,6 +93,7 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm evaluation answers --file <cases.json>`                    | Runs cases through the answer engine; fails any answer without a valid source (docs/citations.md)                                                |
 | `pnpm evaluation retrieval --file <cases.json>`                  | Runs retrieval evaluation cases; hit@1/3/5 and MRR; exit 1 if any case fails                                                                     |
 | `pnpm diagnose`                                                  | Configuration plus live checks of Moodle, search, embeddings, chat and state stores; JSON, no secrets; exit 1 on failure (docs/observability.md) |
+| `pnpm infra:validate`                                            | Lint and build the Bicep templates and parameter files; skipped when no Bicep CLI is installed (docs/infrastructure.md)                          |
 
 Validation gate used before every phase is committed:
 

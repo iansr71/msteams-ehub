@@ -29,3 +29,6 @@ apps/teams-app/build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Real environment settings for infrastructure/scripts (only the .example files are committed)
+infrastructure/environments/*.env

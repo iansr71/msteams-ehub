@@ -138,12 +138,12 @@ from the spans as well.
 
 ## Health endpoints
 
-| Endpoint            | Service  | Meaning                                                                                                                                              |
-| ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health/live`  | API, bot | The process serves HTTP. Never checks anything external, so a Moodle or Azure outage does not restart the service. Use it as the **liveness** probe. |
-| `GET /health/ready` | API      | Every required dependency answered. `503` otherwise, or when no identity provider is configured. Use it as the **readiness** probe.                  |
-| `GET /health/ready` | bot      | The answer API's `/health/live` answered within 3 s (cached 15 s), and SSO is configured.                                                            |
-| `GET /health`       | API, bot | The existing summary: service, version, identity mode. Unchanged.                                                                                    |
+| Endpoint            | Service  | Meaning                                                                                                                                               |
+| ------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health/live`  | API, bot | The process serves HTTP. Never checks anything external, so a Moodle or Azure outage does not restart the service. Use it as the **liveness** probe.  |
+| `GET /health/ready` | API      | Every required dependency answered. `503` otherwise, or when no identity provider is configured. Monitor it (availability test); see below on probes. |
+| `GET /health/ready` | bot      | The answer API's `/health/live` answered within 3 s (cached 15 s), and SSO is configured.                                                             |
+| `GET /health`       | API, bot | The existing summary: service, version, identity mode. Unchanged.                                                                                     |
 
 The API's readiness checks are listed below. Results are cached for 30 seconds, and each probe
 times out after 5 seconds. The response lists each dependency with its status (`up`, `down`,
@@ -157,12 +157,24 @@ times out after 5 seconds. The response lists each dependency with its status (`
 | `moodle`      | when Moodle authorisation is configured       | `core_webservice_get_site_info`                                       |
 | `state_store` | with authorisation or the administration area | Reads the identity store and the sync state                           |
 
-Search reports `degraded` when the credential cannot read service statistics. A data-plane-only
-identity, which is the least-privilege choice for the API, is reported that way. It also reports
-`degraded` when the index has pending compatible schema changes. Both still serve queries, so
-neither makes the API not ready.
+Search reports `degraded` when the credential cannot read service statistics (which needs
+Search Service Contributor), or when the index has pending compatible schema changes. Both still
+serve queries, so neither makes the API not ready. The check also reads the index definition and
+statistics. The query-only role (Search Index Data Reader) cannot do that, and the check then
+reports `unhealthy`. So the API identity also gets the control-plane Reader role on the search
+service (infrastructure/bicep/modules/search.bicep). Phase 16 said a data-plane-only identity
+would be `degraded`; that was wrong.
 
 A required dependency without a probe counts as not ready, so a misconfiguration fails closed.
+
+**Platform probes.** With one replica (this deployment, docs/infrastructure.md), do not use
+`/health/ready` as the platform's readiness probe. Every replica shares Moodle, Search and the
+model, so a failed check takes the only replica out of service without routing anywhere better.
+That removes the admin page and the bot's polite error replies during an outage. Container Apps
+probes `/health/live` for startup, liveness and readiness. An Application Insights availability
+test watches `/health/ready` and alerts on it. Phase 16 recommended `/health/ready` as the
+readiness probe; that advice holds only with several replicas behind a load balancer that can
+route around one.
 
 ### `pnpm diagnose`
 

@@ -44,8 +44,9 @@ export function createApiReadiness(inputs: ApiReadinessInputs): ReadinessService
       required: true,
       probe: hasHealthCheck<{ status: string }>(search)
         ? expectHealthy(
-            // `degraded` still serves queries: it means a data-plane-only credential cannot read
-            // service statistics, or the index has pending compatible changes.
+            // `degraded` still serves queries: the credential cannot read service statistics,
+            // or the index has pending compatible changes. Reading the index definition needs
+            // more than Search Index Data Reader (docs/observability.md).
             async (signal) => (await search.healthCheck({ signal })).status !== 'unhealthy',
             'unhealthy',
           )

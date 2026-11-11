@@ -16,7 +16,14 @@ export default tseslint.config(
       parserOptions: {
         projectService: {
           // Root-level tool configs are not part of any package tsconfig.
-          allowDefaultProject: ['*.js', '*.mjs', '*.ts', 'scripts/*.mjs'],
+          allowDefaultProject: [
+            '*.js',
+            '*.mjs',
+            '*.ts',
+            'scripts/*.mjs',
+            'infrastructure/scripts/*.d.mts',
+            'infrastructure/scripts/lib/*.d.mts',
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -44,6 +51,11 @@ export default tseslint.config(
   {
     files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    // Plain JavaScript cannot carry type annotations; exported helpers have .d.mts files instead.
+    files: ['**/*.js', '**/*.mjs'],
+    rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },
   },
   {
     // The administration page runs in the browser, with MSAL loaded as a global script.

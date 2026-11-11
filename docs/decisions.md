@@ -317,3 +317,50 @@ dropped the first spans of a process. At Skin Renewal's volume it would discard 
 of traces, and with it the evidence for the alerts. `tracesPerSecond: 0` selects the fixed-ratio
 sampler; `samplingRatio: 1` keeps everything. This was found by running the real distribution
 (`tests/integration/azure-monitor-instrumentation.test.ts`), not from its documentation.
+
+## Azure Container Apps, one image, scheduled jobs (phase 19)
+
+The API and the bot run as Container Apps; sync, enrolment refresh and reconciliation run as
+scheduled Container Apps jobs. All of them use one image, `ehub:<commit>`, with different
+commands, so a release is one build and a rollback is one tag. App Service was the alternative.
+Container Apps gives revision history for rollback, native scheduled jobs, managed-identity image
+pulls and Key Vault references, and scales the jobs to zero between runs. Images are built with
+`az acr build`, so deploying needs no local Docker.
+
+## Two deployment stages (phase 19)
+
+Each identity reads only the Key Vault secrets it needs, by a role assignment on the secret.
+Such an assignment needs the secret to exist, and the services need the image and secrets to
+start. So stage 1 creates everything else, the operator adds the Moodle token and bot secret,
+and stage 2 deploys the services. Granting access to the whole vault would allow one stage, but
+would let the bot read the Moodle token.
+
+## The file-based state stores, on Azure Files, for the pilot only (phase 19)
+
+The only state store implementations are the JSON-file stores from phases 11–15, so the
+deployment mounts them from an Azure Files share. They need one API replica, and locking over
+SMB is not verified. They also force shared-key access on the storage account, because
+Container Apps mounts Azure Files only with the account key. This is acceptable for a pilot, not
+for production with all staff. Before production, implement the database stores (docs/sync.md
+has the layout) and let the API scale out.
+
+## Platform probes on /health/live, readiness monitored separately (phase 19)
+
+With one replica sharing Moodle, Search and the model with nothing else, a failing readiness
+probe only takes the service offline, admin page included. Container Apps therefore probes
+`/health/live`, and an availability test alerts on `/health/ready`. This corrects the Phase 16
+advice to use `/health/ready` as the readiness probe, which holds only with several replicas
+behind a load balancer.
+
+## Bot SSO connection by script, not Bicep (phase 19)
+
+The Azure Bot OAuth connection needs the Entra ID provider's identifier and parameter names,
+which the template reference does not document. `configure-bot-sso` reads them from
+`az bot authsetting list-providers` at run time and stops if it cannot find them, rather than
+deploying a guessed GUID.
+
+## Test runs with NODE_ENV=production (phase 19)
+
+The test environment uses real Entra sign-in and production configuration rules. Problems that
+only production rules catch then show up in the pilot, not after go-live. Its differences from
+production are sizes and protections (locks, purge protection, retention), not behaviour.

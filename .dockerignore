@@ -1,0 +1,28 @@
+# Secrets and local state never enter the build context.
+.env
+.env.*
+*.pem
+*.pfx
+*.key
+.local/
+.ehub/
+reports/
+*.log
+
+# Rebuilt inside the image.
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+coverage/
+
+# Not needed to build or run the services.
+.git/
+.vscode/
+.idea/
+docs/
+infrastructure/
+tests/
+apps/teams-app/build/
+**/*.test.ts
+**/__fixtures__/
+docker-compose.yml

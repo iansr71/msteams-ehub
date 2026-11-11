@@ -28,7 +28,8 @@
     "authorization": "pnpm --silent --filter @ehub/api run authorization",
     "teams:validate": "pnpm --silent --filter @ehub/teams-app run manifest validate",
     "teams:package": "pnpm --silent --filter @ehub/teams-app run manifest package",
-    "teams:dev": "pnpm --silent --filter @ehub/teams-app run dev"
+    "teams:dev": "pnpm --silent --filter @ehub/teams-app run dev",
+    "infra:validate": "node infrastructure/scripts/validate-bicep.mjs"
   },
   "devDependencies": {
     "@ehub/moodle-client": "workspace:*",
