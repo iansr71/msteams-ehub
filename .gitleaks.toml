@@ -1,0 +1,21 @@
+# gitleaks configuration (https://github.com/gitleaks/gitleaks), for anyone who runs it locally or
+# in a pipeline: `gitleaks detect --redact`. The repository's own check, `pnpm secrets:scan`
+# (scripts/secret-scan.mjs), needs no extra tool and runs with the tests.
+title = "E-Hub Teams Knowledge Assistant"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials used by tests and examples"
+paths = [
+  '''(^|/)__fixtures__/''',
+  '''\.test\.[cm]?[jt]s$''',
+  '''^tests/''',
+  '''\.env\.example$''',
+  '''^pnpm-lock\.yaml$''',
+]
+regexes = [
+  '''(?i)fake|example|placeholder|from-key-vault''',
+  '''0{8}-0{4}-[0-4]0{3}-[08]0{3}-0{11}[0-9]''',
+]

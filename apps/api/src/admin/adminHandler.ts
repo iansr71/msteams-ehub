@@ -171,6 +171,8 @@ function securityHeaders(authorityOrigin: string): Record<string, string> {
     'referrer-policy': 'no-referrer',
     'x-frame-options': 'DENY',
     'cross-origin-opener-policy': 'same-origin',
+    'cross-origin-resource-policy': 'same-origin',
+    'strict-transport-security': 'max-age=31536000; includeSubDomains',
     // No inline script or style anywhere; MSAL's silent renewal needs the authority in a frame.
     'content-security-policy': [
       "default-src 'none'",

@@ -364,3 +364,26 @@ deploying a guessed GUID.
 The test environment uses real Entra sign-in and production configuration rules. Problems that
 only production rules catch then show up in the pilot, not after go-live. Its differences from
 production are sizes and protections (locks, purge protection, retention), not behaviour.
+
+## Abuse limits in the API, keyed by the validated user (phase 17)
+
+Rate limits (questions and feedback per user) and the cap on concurrent answers are checked in
+the API after token validation and before the body is parsed or Moodle is asked. Keying by the
+Entra object ID means a caller cannot dodge a limit by changing anything they send. Checking
+before any work makes a refused request nearly free. The limits are in memory: right for the
+single API replica, and to be moved to a shared store with the database state store.
+
+## No cross-origin access instead of a CORS allowlist (phase 17)
+
+Prompt 17 asks for a CORS allowlist. Nothing needs cross-origin access: the bot calls the API
+server-to-server, and the admin page is served from the API's own origin. So the API sends no
+Access-Control-Allow-* headers and refuses preflight requests. An allowlist with no entries
+would be the same thing, with code that could be misconfigured. A future browser client on
+another origin would add an explicit allowlist.
+
+## A skipped security test fails the security report (phase 17)
+
+`pnpm test:security` reports a control as passed only when every test listed for it ran and
+passed. A skipped test (the Bicep or PowerShell checks, when those tools are missing) makes the
+control incomplete, which fails the run. A report that says "pass" for a check that never ran
+would be worse than one that fails and says why.

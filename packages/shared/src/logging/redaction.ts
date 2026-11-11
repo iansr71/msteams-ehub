@@ -48,6 +48,13 @@ const STRING_PATTERNS: readonly (readonly [RegExp, string])[] = [
     /([?&;](?:wstoken|token|access_token|refresh_token|id_token|api[-_]?key|client_secret|code|sig|password)=)[^&#\s"'<>]*/gi,
     `$1${REDACTED}`,
   ],
+  // Named credentials in free text, as SDK and HTTP errors print them: `api-key: abc123`,
+  // `client_secret=abc123`, `"password": "abc123"`. Bare `token` and `key` are left out: they
+  // are too common in ordinary messages ("token: expired").
+  [
+    /\b((?:x-)?api[-_ ]?key|ocp-apim-subscription-key|subscription[-_ ]?key|client[-_ ]?secret|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|wstoken|password|passwd|pwd|secret)(["']?\s*[:=]\s*["']?)[^\s"',;&<>{}()[\]]{6,}/gi,
+    `$1$2${REDACTED}`,
+  ],
   // Authorization header values embedded in free text.
   [/\b(Bearer|Basic|Negotiate)\s+[A-Za-z0-9\-._~+/]+=*/gi, `$1 ${REDACTED}`],
   // JWTs (header.payload.signature, base64url, header always starts with eyJ).

@@ -6,6 +6,7 @@ export * from './config/load.js';
 export * from './config/schema.js';
 export * from './correlation/correlation.js';
 export * from './health/health.js';
+export * from './http/networkHosts.js';
 export * from './logging/logger.js';
 export * from './logging/redaction.js';
 export * from './runtime/packageVersion.js';

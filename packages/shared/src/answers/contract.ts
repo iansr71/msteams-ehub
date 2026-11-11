@@ -115,3 +115,20 @@ export const apiHealthResponseSchema = z.object({
   identityMode: z.enum(['entra', 'dev-mock', 'entra+dev-mock', 'none']),
 });
 export type ApiHealthResponse = z.output<typeof apiHealthResponseSchema>;
+
+/**
+ * Response headers for the JSON endpoints of the API and the bot. Responses are never cached,
+ * sniffed, framed or loaded by other origins, and a browser that somehow renders one may load
+ * nothing. HSTS only takes effect over HTTPS (the platform terminates TLS; plain HTTP ignores
+ * it). No Access-Control-Allow-* header is ever sent: no other origin may read these APIs.
+ */
+export const JSON_SECURITY_HEADERS = {
+  'content-type': 'application/json; charset=utf-8',
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+  'cross-origin-resource-policy': 'same-origin',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
+} as const;

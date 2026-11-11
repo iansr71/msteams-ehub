@@ -15,6 +15,8 @@ user's Moodle course enrolments.
 > `/health/live` and `/health/ready`, `pnpm diagnose` and the recommended alerts are in
 > docs/observability.md. Azure deployment (Bicep, Container Apps, scripts for deploy, what-if,
 > rollback and Teams packaging) is in docs/infrastructure.md.
+> Security: docs/security.md (controls and how they are tested), docs/threat-model.md and
+> docs/security-test-report.md (`pnpm test:security`; `pnpm secrets:scan`).
 
 ## Repository layout
 
@@ -94,6 +96,8 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm evaluation retrieval --file <cases.json>`                  | Runs retrieval evaluation cases; hit@1/3/5 and MRR; exit 1 if any case fails                                                                     |
 | `pnpm diagnose`                                                  | Configuration plus live checks of Moodle, search, embeddings, chat and state stores; JSON, no secrets; exit 1 on failure (docs/observability.md) |
 | `pnpm infra:validate`                                            | Lint and build the Bicep templates and parameter files; skipped when no Bicep CLI is installed (docs/infrastructure.md)                          |
+| `pnpm test:security`                                             | Run the security tests and report pass or fail per control; exit 1 if any control fails or was skipped (docs/security.md)                        |
+| `pnpm secrets:scan`                                              | Scan tracked and untracked files for committed credentials; reports file and line, never the value                                               |
 
 Validation gate used before every phase is committed:
 

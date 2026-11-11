@@ -106,6 +106,32 @@ describe('redact', () => {
     expect(redactString(`raw ${jwt} end`)).toBe(`raw ${REDACTED} end`);
   });
 
+  it.each([
+    ['api-key: 9f8e7d6c5b4a39281706f5e4', 'api-key: [REDACTED]'],
+    ['invalid api_key=9f8e7d6c5b4a39281706f5e4 supplied', 'invalid api_key=[REDACTED] supplied'],
+    ['{"x-api-key":"9f8e7d6c5b4a3928"}', '{"x-api-key":"[REDACTED]"}'],
+    ['Ocp-Apim-Subscription-Key: abcdef123456', 'Ocp-Apim-Subscription-Key: [REDACTED]'],
+    ['inner: client_secret=s3cr3t~Value.123', 'inner: client_secret=[REDACTED]'],
+    ['client secret = abcDEF123456', 'client secret = [REDACTED]'],
+    ['password="hunter2hunter2"', 'password="[REDACTED]"'],
+    ["wstoken: 'a1b2c3d4e5f60718'", "wstoken: '[REDACTED]'"],
+    ['access_token=ya29.a0AfH6SMBx', 'access_token=[REDACTED]'],
+  ])('scrubs the named credential in %s', (input, expected) => {
+    expect(redactString(input)).toBe(expected);
+  });
+
+  it.each([
+    'token: expired',
+    'The password must be at least 12 characters.',
+    'secret: no',
+    'Rotate the client secret before it expires.',
+    'api key missing',
+    'key=value pairs are parsed here',
+    'category: authentication, code: invalid_token',
+  ])('leaves the ordinary message "%s" readable', (input) => {
+    expect(redactString(input)).toBe(input);
+  });
+
   it('scrubs Application Insights instrumentation keys', () => {
     expect(
       redactString('InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=x'),

@@ -1,0 +1,349 @@
+{
+  "description": "Security controls and the automated tests that check each one. `pnpm test:security` runs these tests and reports pass or fail per control (scripts/security-report.mjs). A control passes only when every listed test ran and passed. `suite` limits a file to the tests under that describe block.",
+  "controls": [
+    {
+      "id": "PI-1",
+      "area": "Prompt injection",
+      "control": "System instructions, the user's question and retrieved passages are kept apart; look-alike tags in user or document text are defused",
+      "attack": "user prompt injection",
+      "tests": [
+        {
+          "file": "tests/security/attacks/prompt-injection.test.ts",
+          "suite": "attack: user prompt injection"
+        },
+        {
+          "file": "apps/api/src/rag/rag.test.ts",
+          "suite": "RagService: prompt injection"
+        }
+      ]
+    },
+    {
+      "id": "PI-2",
+      "area": "Prompt injection",
+      "control": "Retrieved passages are labelled untrusted evidence; output that follows a document's instructions (unsupported claims, foreign links, invented sources) is removed or the answer is withheld",
+      "attack": "PDF prompt injection",
+      "tests": [
+        {
+          "file": "tests/security/attacks/prompt-injection.test.ts",
+          "suite": "attack: PDF prompt injection"
+        }
+      ]
+    },
+    {
+      "id": "PI-3",
+      "area": "Prompt injection",
+      "control": "Text a reader cannot see (hidden elements, comments, scripts, attributes) is not indexed; nothing a page refers to is fetched",
+      "attack": "hidden HTML instructions",
+      "tests": [
+        {
+          "file": "tests/security/attacks/prompt-injection.test.ts",
+          "suite": "attack: hidden HTML instructions"
+        },
+        {
+          "file": "apps/indexer/src/extractors/htmlExtractor.test.ts"
+        },
+        {
+          "file": "apps/indexer/src/extractors/docxExtractor.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "IN-1",
+      "area": "Input controls",
+      "control": "Question length limit, request-size limit (declared and streamed), content-type and schema validation; parser errors are not echoed",
+      "attack": "oversized question",
+      "tests": [
+        {
+          "file": "tests/security/attacks/request-forgery.test.ts",
+          "suite": "attack: oversized and malformed input"
+        },
+        {
+          "file": "apps/api/src/http/apiServer.test.ts",
+          "suite": "answer API"
+        }
+      ]
+    },
+    {
+      "id": "IN-2",
+      "area": "Input controls",
+      "control": "Unicode normalisation; control and direction-override characters removed from questions, sources and card text",
+      "tests": [
+        {
+          "file": "tests/security/attacks/request-forgery.test.ts",
+          "suite": "attack: oversized and malformed input"
+        },
+        {
+          "file": "apps/indexer/src/extractors/textNormalization.test.ts"
+        },
+        {
+          "file": "apps/teams-app/src/cards/cards.test.ts",
+          "suite": "card text"
+        }
+      ]
+    },
+    {
+      "id": "IN-3",
+      "area": "Input controls",
+      "control": "Per-user rate limits (questions and feedback) and a concurrency cap, keyed by the validated identity",
+      "tests": [
+        {
+          "file": "apps/api/src/http/requestLimits.test.ts"
+        },
+        {
+          "file": "apps/api/src/http/apiServer.test.ts",
+          "suite": "abuse limits"
+        },
+        {
+          "file": "tests/security/attacks/request-forgery.test.ts",
+          "suite": "attack: flooding"
+        }
+      ]
+    },
+    {
+      "id": "OUT-1",
+      "area": "Output controls",
+      "control": "Model output is never rendered as HTML or Markdown: JSON responses with no-sniff headers, plain-text runs in Adaptive Cards, card templates defused",
+      "attack": "script output",
+      "tests": [
+        {
+          "file": "tests/security/attacks/malicious-output.test.ts",
+          "suite": "attack: script and markup in model output"
+        },
+        {
+          "file": "apps/teams-app/src/cards/cards.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "OUT-2",
+      "area": "Output controls",
+      "control": "Citations come from retrieved chunks only; unknown or invented sources are dropped; links are https on allowlisted Moodle hosts",
+      "attack": "malicious citation",
+      "tests": [
+        {
+          "file": "tests/security/attacks/malicious-output.test.ts",
+          "suite": "attack: malicious citation"
+        },
+        {
+          "file": "apps/api/src/rag/citations.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SRV-1",
+      "area": "Server controls",
+      "control": "Secure response headers on the API, the bot and the administration page; no cross-origin access (no CORS headers, preflight refused)",
+      "tests": [
+        {
+          "file": "apps/api/src/http/apiServer.test.ts",
+          "suite": "response headers and cross-origin requests"
+        },
+        {
+          "file": "apps/teams-app/src/teams/httpAdapter.test.ts",
+          "suite": "bot response headers"
+        },
+        {
+          "file": "apps/api/src/admin/admin.test.ts",
+          "suite": "administration page delivery"
+        }
+      ]
+    },
+    {
+      "id": "SRV-2",
+      "area": "Server controls",
+      "control": "Browser mutations on the administration page need a bearer token (no cookies), a same-origin Origin header and explicit confirmation for destructive actions",
+      "tests": [
+        {
+          "file": "apps/api/src/admin/admin.test.ts",
+          "suite": "administration actions"
+        },
+        {
+          "file": "tests/security/attacks/admin-role-bypass.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SRV-3",
+      "area": "Server controls",
+      "control": "Request timeout and dependency timeouts (Moodle, readiness probes); HTTPS required for every service URL in production",
+      "tests": [
+        {
+          "file": "apps/api/src/http/apiServer.test.ts",
+          "suite": "answer API"
+        },
+        {
+          "file": "apps/api/src/health/readiness.test.ts"
+        },
+        {
+          "file": "packages/moodle-client/src/transport.test.ts"
+        },
+        {
+          "file": "packages/shared/src/config/config.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SRV-4",
+      "area": "Server controls",
+      "control": "Error responses carry a code, a fixed message and a reference only: no exception text, stack, URL or credential; failures are logged with secrets redacted",
+      "attack": "token leakage through exceptions",
+      "tests": [
+        {
+          "file": "tests/security/attacks/token-leakage.test.ts"
+        },
+        {
+          "file": "packages/shared/src/logging/redaction.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SSRF-1",
+      "area": "SSRF defences",
+      "control": "Only Moodle file URLs on the configured site are downloaded; redirects only to approved hosts; loopback, link-local and metadata addresses refused; the token never leaves the Moodle host; no API accepts a URL",
+      "attack": "SSRF URL",
+      "tests": [
+        {
+          "file": "tests/security/attacks/ssrf-and-resource-urls.test.ts",
+          "suite": "attack: SSRF through a download URL"
+        },
+        {
+          "file": "packages/shared/src/http/networkHosts.test.ts"
+        },
+        {
+          "file": "packages/moodle-client/src/downloader.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SSRF-2",
+      "area": "SSRF defences",
+      "control": "Download paths are limited to Moodle's file endpoints; traversal, other endpoints and injected credentials are refused",
+      "attack": "unauthorized resource URL",
+      "tests": [
+        {
+          "file": "tests/security/attacks/ssrf-and-resource-urls.test.ts",
+          "suite": "attack: unauthorised resource URL"
+        }
+      ]
+    },
+    {
+      "id": "FILE-1",
+      "area": "File processing",
+      "control": "Content type decided from the bytes, not the declared type; input-size limit; parser timeout; unsupported and encrypted files reported, not parsed",
+      "tests": [
+        {
+          "file": "apps/indexer/src/extractors/contentTypeDetector.test.ts"
+        },
+        {
+          "file": "apps/indexer/src/extractors/extractorRegistry.test.ts"
+        },
+        {
+          "file": "apps/indexer/src/extractors/pdfExtractor.test.ts"
+        },
+        {
+          "file": "tests/security/pdf-parser.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "FILE-2",
+      "area": "File processing",
+      "control": "Archives (docx, pptx): entry-count, per-entry and total decompression limits, compression-ratio check, traversal-safe entry names, encrypted entries refused",
+      "tests": [
+        {
+          "file": "apps/indexer/src/extractors/safeZip.test.ts"
+        },
+        {
+          "file": "apps/indexer/src/extractors/pptxExtractor.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "AUTH-1",
+      "area": "Authentication and authorisation",
+      "control": "Entra tokens: signature, issuer, audience, tenant, expiry, version, scope and calling app are validated; identity comes only from the validated token; unknown users are refused",
+      "attack": "forged identity fields",
+      "tests": [
+        {
+          "file": "apps/api/src/auth/entraTokenValidator.test.ts"
+        },
+        {
+          "file": "tests/security/attacks/request-forgery.test.ts",
+          "suite": "attack: forged identity fields"
+        }
+      ]
+    },
+    {
+      "id": "AUTH-2",
+      "area": "Authentication and authorisation",
+      "control": "Course filtering happens before retrieval, from Moodle enrolments; a course the user is not enrolled in is refused; it fails closed when Moodle cannot confirm",
+      "attack": "forged course ID",
+      "tests": [
+        {
+          "file": "tests/security/attacks/request-forgery.test.ts",
+          "suite": "attack: forged course ID"
+        },
+        {
+          "file": "tests/security/course-authorization.test.ts"
+        },
+        {
+          "file": "apps/api/src/authorization/authorization.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "AUTH-3",
+      "area": "Authentication and authorisation",
+      "control": "Administration actions are checked server-side against app roles in the token, for every endpoint and role",
+      "attack": "admin-role bypass",
+      "tests": [
+        {
+          "file": "tests/security/attacks/admin-role-bypass.test.ts"
+        },
+        {
+          "file": "apps/api/src/admin/adminRoles.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SEC-1",
+      "area": "Secrets",
+      "control": "Configuration is validated at start-up and reported by variable name only; every secret setting is registered for redaction; nothing sensitive reaches logs or telemetry; source files carry no invisible or direction-override characters",
+      "tests": [
+        {
+          "file": "packages/shared/src/config/config.test.ts"
+        },
+        {
+          "file": "packages/shared/src/logging/logger.test.ts"
+        },
+        {
+          "file": "tests/security/telemetry-redaction.test.ts"
+        },
+        {
+          "file": "tests/security/env-example.test.ts"
+        },
+        {
+          "file": "tests/security/source-characters.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "SEC-2",
+      "area": "Secrets",
+      "control": "Deployed services read secrets from Key Vault with managed identities; Azure AI Search keys are disabled; nothing tenant-specific or secret is committed; committed files are scanned for secrets",
+      "tests": [
+        {
+          "file": "tests/integration/infrastructure.test.ts",
+          "suite": "settings from main.bicep"
+        },
+        {
+          "file": "tests/integration/infrastructure.test.ts",
+          "suite": "committed infrastructure files"
+        },
+        {
+          "file": "tests/security/secret-scan.test.ts"
+        }
+      ]
+    }
+  ]
+}

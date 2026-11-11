@@ -25,7 +25,7 @@ export function extractHtml(
 /** HTML files attached to File or Folder activities. Moodle Pages and Books have their own. */
 export const htmlExtractor: ContentExtractor = {
   name: 'html',
-  version: '1.0.0',
+  version: '1.1.0',
   resourceType: 'html',
   supports: ({ contentType, resource }) =>
     contentType === 'html' && resource.role !== 'page-body' && resource.role !== 'book-chapter',

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { isLocalNetworkHost } from '../http/networkHosts.js';
 import { LOG_LEVEL_SETTINGS } from '../logging/logger.js';
 
 export const NODE_ENVIRONMENTS = ['development', 'test', 'production'] as const;
@@ -476,6 +477,10 @@ const mockUserId = z
 export const API_SERVER_DEFAULTS = {
   host: '127.0.0.1',
   requestTimeoutMs: 90_000,
+  rateLimitQuestions: 20,
+  rateLimitWindowSeconds: 60,
+  rateLimitFeedback: 60,
+  maxConcurrentAnswers: 16,
   mockUserId: 'dev-mock-user',
 } as const;
 
@@ -487,6 +492,17 @@ export const apiServerConfigShape = {
   /** Interface to listen on; loopback by default. */
   API_HOST: z.string().trim().min(1).max(255).default(API_SERVER_DEFAULTS.host),
   API_REQUEST_TIMEOUT_MS: boundedInteger(5_000, 300_000, API_SERVER_DEFAULTS.requestTimeoutMs),
+  /** Questions one user may ask per window; further ones get 429 with Retry-After. */
+  API_RATE_LIMIT_QUESTIONS: boundedInteger(1, 1_000, API_SERVER_DEFAULTS.rateLimitQuestions),
+  API_RATE_LIMIT_WINDOW_SECONDS: boundedInteger(
+    1,
+    3_600,
+    API_SERVER_DEFAULTS.rateLimitWindowSeconds,
+  ),
+  /** Feedback submissions one user may send per window. */
+  API_RATE_LIMIT_FEEDBACK: boundedInteger(1, 1_000, API_SERVER_DEFAULTS.rateLimitFeedback),
+  /** Answers generated at once, across all users; further questions get 429. */
+  API_MAX_CONCURRENT_ANSWERS: boundedInteger(1, 500, API_SERVER_DEFAULTS.maxConcurrentAnswers),
   API_DEV_MOCK_IDENTITY: booleanFlag(false),
   API_DEV_MOCK_USER_ID: mockUserId.default(API_SERVER_DEFAULTS.mockUserId),
   /** The mock user's "authorised" courses (development only). */
@@ -825,7 +841,8 @@ const URL_KEY_PATTERN = /_(?:URL|ENDPOINT)$/;
 
 /**
  * Builds a schema of the runtime variables plus `shape`, enforcing production-only rules that
- * depend on NODE_ENV (currently: every *_URL / *_ENDPOINT variable must use https).
+ * depend on NODE_ENV (every *_URL / *_ENDPOINT variable must use https and must not point at a
+ * loopback, link-local or metadata address).
  */
 export function defineConfigSchema<Shape extends z.ZodRawShape>(
   shape: Shape,
@@ -836,8 +853,19 @@ export function defineConfigSchema<Shape extends z.ZodRawShape>(
       return;
     }
     for (const [key, value] of Object.entries(values)) {
-      if (URL_KEY_PATTERN.test(key) && typeof value === 'string' && !value.startsWith('https://')) {
+      if (!URL_KEY_PATTERN.test(key) || typeof value !== 'string') {
+        continue;
+      }
+      if (!value.startsWith('https://')) {
         ctx.addIssue({ code: 'custom', path: [key], message: 'Must use https in production.' });
+      } else if (URL.canParse(value) && isLocalNetworkHost(new URL(value).hostname)) {
+        // A service URL pointing at this machine or the metadata service is a misconfiguration
+        // at best and a request-forgery target at worst.
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Must not be a loopback, link-local or metadata address in production.',
+        });
       }
     }
   });

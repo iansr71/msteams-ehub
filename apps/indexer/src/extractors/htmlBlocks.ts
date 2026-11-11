@@ -91,6 +91,27 @@ const INLINE_ELEMENTS: ReadonlySet<string> = new Set([
   'br',
 ]);
 
+/*
+ * Inline styles that hide text from a reader: content nobody can see must not become evidence,
+ * because hidden text is the usual carrier for instructions aimed at the model. Covers
+ * display/visibility, zero font size, opacity or box size, far off-screen positioning and
+ * clipping. Text hidden by colour (white on white) or by a stylesheet rule is not detected.
+ */
+const ZERO = String.raw`0(?:\.0+)?(?:px|pt|em|rem|%)?\s*(?:;|!|$)`;
+const HIDING_STYLE = new RegExp(
+  [
+    String.raw`display\s*:\s*none`,
+    String.raw`visibility\s*:\s*(?:hidden|collapse)`,
+    String.raw`(?:^|;|\s)font-size\s*:\s*${ZERO}`,
+    String.raw`(?:^|;|\s)opacity\s*:\s*${ZERO}`,
+    String.raw`(?:^|;|\s)(?:max-)?(?:height|width)\s*:\s*${ZERO}`,
+    String.raw`(?:^|;|\s)(?:left|top|right|bottom|text-indent|margin-left|margin-top)\s*:\s*-\d{3,}`,
+    String.raw`clip\s*:\s*rect\(\s*0`,
+    String.raw`clip-path\s*:\s*inset\(\s*(?:50|100)%`,
+  ].join('|'),
+  'i',
+);
+
 function isDropped(element: Element): boolean {
   if (DROPPED_ELEMENTS.has(element.name)) {
     return true;
@@ -102,7 +123,7 @@ function isDropped(element: Element): boolean {
   if (DROPPED_ROLES.has((attributes['role'] ?? '').toLowerCase())) {
     return true;
   }
-  if (/display\s*:\s*none|visibility\s*:\s*hidden/i.test(attributes['style'] ?? '')) {
+  if (HIDING_STYLE.test(attributes['style'] ?? '')) {
     return true;
   }
   return (

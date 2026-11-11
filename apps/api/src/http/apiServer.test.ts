@@ -20,6 +20,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ReadinessReport } from '../health/readiness.js';
+import { ConcurrencyLimiter, SlidingWindowRateLimiter } from './requestLimits.js';
 
 import { SECRET_SENTENCE, TENANT_ID, seededSearch } from '../retrieval/__fixtures__/corpus.js';
 import { RetrievalService } from '../retrieval/retrievalService.js';
@@ -37,6 +38,7 @@ import {
 import { RetrievalOrchestrator } from '../rag/retrievalOrchestrator.js';
 import {
   startApiServer,
+  type ApiServerOptions,
   MAX_BODY_BYTES,
   type Answerer,
   type RunningApiServer,
@@ -115,6 +117,7 @@ async function serve(
     authenticator?: RequestAuthenticator;
     requestTimeoutMs?: number;
     readiness?: { report(): Promise<ReadinessReport> };
+    limits?: ApiServerOptions['limits'];
   } = {},
 ): Promise<Harness> {
   const requests: RagRequest[] = [];
@@ -157,6 +160,7 @@ async function serve(
       tenantId: TENANT_ID,
       requestTimeoutMs: options.requestTimeoutMs ?? 5_000,
       ...(options.readiness === undefined ? {} : { readiness: options.readiness }),
+      ...(options.limits === undefined ? {} : { limits: options.limits }),
       logger: createLogger({
         service: 'test',
         level: 'trace',
@@ -674,5 +678,147 @@ describe('health endpoints and telemetry', () => {
       status: 'error',
       failureCategory: 'internal_error',
     });
+  });
+});
+
+describe('abuse limits', () => {
+  afterEach(() => {
+    resetTelemetry();
+  });
+
+  function limits(questions: number, feedback = 100, concurrent = 100) {
+    return {
+      questions: new SlidingWindowRateLimiter({ limit: questions, windowMs: 60_000 }),
+      feedback: new SlidingWindowRateLimiter({ limit: feedback, windowMs: 60_000 }),
+      concurrency: new ConcurrencyLimiter(concurrent),
+    };
+  }
+
+  it('refuses questions beyond the per-user limit with 429 and Retry-After', async () => {
+    const memory = new InMemoryTelemetry();
+    setTelemetry(memory);
+    const h = await serve({ limits: limits(2) });
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(200);
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(200);
+    const refused = await post(`${h.url}/v1/answers`, { question: QUESTION });
+    expect(refused.status).toBe(429);
+    expect(Number(refused.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+    expect(Number(refused.headers.get('retry-after'))).toBeLessThanOrEqual(60);
+    expect(await refused.json()).toMatchObject({ error: { code: 'rate_limited' } });
+    expect(h.requests).toHaveLength(2);
+    expect(memory.sum('ehub.rate_limit.events', { dependency: 'answer_api' })).toBe(1);
+  });
+
+  it('does not count unauthenticated or refused requests against anyone', async () => {
+    const h = await serve({ limits: limits(1) });
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post(`${h.url}/v1/answers`, { question: QUESTION }, {})).status).toBe(401);
+    }
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(200);
+  });
+
+  it('limits a rate-limited caller before reading the body', async () => {
+    const h = await serve({ limits: limits(1) });
+    await post(`${h.url}/v1/answers`, { question: QUESTION });
+    // An invalid body would be 400; the limit is checked first.
+    expect((await post(`${h.url}/v1/answers`, { nonsense: true })).status).toBe(429);
+  });
+
+  it('limits feedback separately from questions', async () => {
+    const h = await serve({ limits: limits(1, 2) });
+    const send = () => post(`${h.url}/v1/feedback`, { answerId: 'a-1', rating: 'useful' });
+    expect((await send()).status).toBe(202);
+    expect((await send()).status).toBe(202);
+    expect((await send()).status).toBe(429);
+    expect(h.feedback).toHaveLength(2);
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(200);
+  });
+
+  it('refuses answers beyond the concurrency cap and frees the slot afterwards', async () => {
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let inFlight = 0;
+    const h = await serve({
+      limits: limits(100, 100, 1),
+      answerer: {
+        ask: async () => {
+          inFlight += 1;
+          await started;
+          return cannedAnswer();
+        },
+      },
+    });
+    const first = post(`${h.url}/v1/answers`, { question: QUESTION });
+    while (inFlight === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const busy = await post(`${h.url}/v1/answers`, { question: QUESTION });
+    expect(busy.status).toBe(429);
+    expect(busy.headers.get('retry-after')).toBe('2');
+    release();
+    expect((await first).status).toBe(200);
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(200);
+  });
+
+  it('frees the slot when the answer fails', async () => {
+    let fail = true;
+    const h = await serve({
+      limits: limits(100, 100, 1),
+      answerer: {
+        ask: () => (fail ? Promise.reject(new Error('boom')) : Promise.resolve(cannedAnswer())),
+      },
+    });
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(500);
+    fail = false;
+    expect((await post(`${h.url}/v1/answers`, { question: QUESTION })).status).toBe(200);
+  });
+});
+
+describe('response headers and cross-origin requests', () => {
+  it('sends strict headers on every JSON response, errors included', async () => {
+    const h = await serve();
+    for (const response of [
+      await post(`${h.url}/v1/answers`, { question: QUESTION }),
+      await post(`${h.url}/v1/answers`, { question: QUESTION }, {}),
+      await fetch(`${h.url}/health`),
+      await fetch(`${h.url}/nope`),
+    ]) {
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('x-frame-options')).toBe('DENY');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('content-security-policy')).toBe(
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      expect(response.headers.get('cross-origin-resource-policy')).toBe('same-origin');
+      expect(response.headers.get('strict-transport-security')).toMatch(/^max-age=31536000/);
+      expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      expect(response.headers.get('x-powered-by')).toBeNull();
+    }
+  });
+
+  it('grants no other origin access: no CORS headers, preflight refused', async () => {
+    const h = await serve();
+    const preflight = await fetch(`${h.url}/v1/answers`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://evil.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,content-type',
+      },
+    });
+    expect(preflight.status).toBe(405);
+    const actual = await post(
+      `${h.url}/v1/answers`,
+      { question: QUESTION },
+      { [MOCK_IDENTITY_HEADER]: MOCK_USER, origin: 'https://evil.example' },
+    );
+    for (const response of [preflight, actual]) {
+      for (const [name] of response.headers) {
+        expect(name.startsWith('access-control-')).toBe(false);
+      }
+    }
   });
 });

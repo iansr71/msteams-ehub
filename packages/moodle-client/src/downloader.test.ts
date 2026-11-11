@@ -144,6 +144,15 @@ describe('HttpMoodleFileDownloader redirects', () => {
     expect(file.redirectCount).toBe(1);
   });
 
+  it.each(['localhost', '127.0.0.1:8443', '169.254.169.254', '[::1]', 'metadata.google.internal'])(
+    'refuses to allowlist the local address %s as a redirect host',
+    (host) => {
+      expect(() => downloader([], { additionalRedirectHosts: [host] })).toThrow(
+        MoodleValidationError,
+      );
+    },
+  );
+
   it('removes token parameters from a same-host redirect instead of resending them', async () => {
     const { instance, calls } = downloader([
       status(303, { location: `/webservice/pluginfile.php/900/other.pdf?token=${FAKE_TOKEN}` }),

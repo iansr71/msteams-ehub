@@ -7,7 +7,7 @@ import type { ContentExtractor } from './types.js';
  */
 export const moodlePageExtractor: ContentExtractor = {
   name: 'moodle-page',
-  version: '1.0.0',
+  version: '1.1.0',
   resourceType: 'moodle-page',
   supports: ({ contentType, resource }) => contentType === 'html' && resource.role === 'page-body',
   extract: ({ resource }, input, context) =>

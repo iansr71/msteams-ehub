@@ -1,4 +1,10 @@
-import { createLogger, registerSecretValue, trackDependency, type Logger } from '@ehub/shared';
+import {
+  createLogger,
+  isLocalNetworkHost,
+  registerSecretValue,
+  trackDependency,
+  type Logger,
+} from '@ehub/shared';
 
 import type { NormalizedMoodleBaseUrl } from './baseUrl.js';
 import {
@@ -77,6 +83,15 @@ const DEFAULT_MAX_REDIRECTS = 3;
 const EXCEPTION_PROBE_BYTES = 64 * 1024;
 const silentLogger = createLogger({ service: 'moodle-client', level: 'silent' });
 
+/** `host[:port]` → host name, for the local-address check. */
+function hostnameOf(host: string): string {
+  try {
+    return new URL(`https://${host}`).hostname;
+  } catch {
+    return host;
+  }
+}
+
 /**
  * Downloads files served by Moodle's pluginfile endpoints.
  *
@@ -103,10 +118,16 @@ export class HttpMoodleFileDownloader implements MoodleFileDownloader {
     this.#options = options;
     this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
     this.#logger = (options.logger ?? silentLogger).child({ component: 'moodle-downloader' });
-    this.#allowedHosts = new Set([
-      options.baseUrl.host,
-      ...(options.additionalRedirectHosts ?? []).map((host) => host.toLowerCase()),
-    ]);
+    const extraHosts = (options.additionalRedirectHosts ?? []).map((host) => host.toLowerCase());
+    for (const host of extraHosts) {
+      if (isLocalNetworkHost(hostnameOf(host))) {
+        throw new MoodleValidationError(
+          'A redirect host must not be a loopback, link-local or metadata address.',
+          { code: 'invalid_configuration' },
+        );
+      }
+    }
+    this.#allowedHosts = new Set([options.baseUrl.host, ...extraHosts]);
   }
 
   /**

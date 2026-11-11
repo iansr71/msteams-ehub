@@ -11,7 +11,9 @@ import {
 } from '@ehub/shared';
 import {
   ANSWER_API_PATHS,
+  JSON_SECURITY_HEADERS,
   answerRequestSchema,
+  type AnswerRequest,
   feedbackRequestSchema,
   type ApiErrorCode,
   type ApiErrorResponse,
@@ -32,6 +34,7 @@ import type { ReadinessReport } from '../health/readiness.js';
 import { AuthorizationUnavailableError, IdentityNotMappedError } from '../authorization/errors.js';
 import type { AuthenticatedCaller, RequestAuthenticator } from './authentication.js';
 import type { FeedbackRecorder } from './feedbackRecorder.js';
+import type { ConcurrencyLimiter, RequestRateLimiter } from './requestLimits.js';
 
 /** The answer operation the server exposes (RagService in production). */
 export interface Answerer {
@@ -59,6 +62,16 @@ export interface ApiServerOptions {
   ) => Promise<void>;
   /** Dependency checks behind /health/ready; without it readiness only reflects this process. */
   readonly readiness?: { report(): Promise<ReadinessReport> };
+  /**
+   * Abuse limits, applied after authentication and keyed by the validated user: questions and
+   * feedback per user, and how many answers are generated at once. Without them nothing is
+   * limited (tests); `serve` always sets them.
+   */
+  readonly limits?: {
+    readonly questions: RequestRateLimiter;
+    readonly feedback: RequestRateLimiter;
+    readonly concurrency: ConcurrencyLimiter;
+  };
   /** Records each answer's outcome (status only) for the administration dashboard. */
   readonly answerOutcomes?: {
     record(outcome: {
@@ -69,14 +82,13 @@ export interface ApiServerOptions {
   };
 }
 
+/** Suggested wait when every answer slot is in use. */
+const BUSY_RETRY_AFTER_MS = 2_000;
+
 /** Questions are short; anything larger is refused before parsing. */
 export const MAX_BODY_BYTES = 16 * 1024;
 
-const SECURITY_HEADERS = {
-  'cache-control': 'no-store',
-  'x-content-type-options': 'nosniff',
-  'content-type': 'application/json; charset=utf-8',
-} as const;
+const SECURITY_HEADERS = JSON_SECURITY_HEADERS;
 
 const STATUS_BY_CODE: Readonly<Record<ApiErrorCode, number>> = {
   invalid_request: 400,
@@ -243,13 +255,40 @@ export function createApiRequestHandler(
     }
   };
 
+  /** Keyed by tenant and validated object ID, never by anything the request states. */
+  const enforceRate = (limiter: RequestRateLimiter | undefined, caller: AuthenticatedCaller) => {
+    const decision = limiter?.check(`${options.tenantId}:${caller.identity.objectId}`);
+    if (decision !== undefined && !decision.allowed) {
+      throw new RagRateLimitError(decision.retryAfterMs ?? BUSY_RETRY_AFTER_MS);
+    }
+  };
+
   const answers = async (
     request: IncomingMessage,
     response: ServerResponse,
     correlationId: string,
   ): Promise<void> => {
     const caller = await authenticate(request);
+    // Before the body is parsed or Moodle is asked: a refused request costs almost nothing.
+    enforceRate(options.limits?.questions, caller);
     const body = await readJson(request, answerRequestSchema);
+    const release = options.limits?.concurrency.tryAcquire();
+    if (options.limits !== undefined && release === undefined) {
+      throw new RagRateLimitError(BUSY_RETRY_AFTER_MS);
+    }
+    try {
+      await answerQuestion(caller, body, response, correlationId);
+    } finally {
+      release?.();
+    }
+  };
+
+  const answerQuestion = async (
+    caller: AuthenticatedCaller,
+    body: AnswerRequest,
+    response: ServerResponse,
+    correlationId: string,
+  ): Promise<void> => {
     const authorizedCourseIds = await options.courseAccess.resolve(caller);
     logger.info('Caller authenticated.', {
       method: caller.identity.authentication.method,
@@ -288,6 +327,7 @@ export function createApiRequestHandler(
     correlationId: string,
   ): Promise<void> => {
     const caller = await authenticate(request);
+    enforceRate(options.limits?.feedback, caller);
     const body = await readJson(request, feedbackRequestSchema);
     await options.feedback.record({
       answerId: body.answerId,

@@ -110,3 +110,28 @@ describe('bot request telemetry', () => {
     expect(memory.sum('ehub.access.denials', { kind: 'bot_request_unauthenticated' })).toBe(1);
   });
 });
+
+describe('bot response headers', () => {
+  it('sends strict headers and grants no other origin access', async () => {
+    const url = await start();
+    for (const response of [
+      await fetch(`${url}/health/live`),
+      await fetch(`${url}/nope`),
+      await fetch(`${url}/api/messages`, {
+        method: 'OPTIONS',
+        headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST' },
+      }),
+    ]) {
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('x-frame-options')).toBe('DENY');
+      expect(response.headers.get('content-security-policy')).toBe(
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      expect(response.headers.get('strict-transport-security')).toMatch(/^max-age=31536000/);
+      for (const [name] of response.headers) {
+        expect(name.startsWith('access-control-')).toBe(false);
+      }
+    }
+  });
+});

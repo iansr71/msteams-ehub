@@ -21,6 +21,7 @@ export default tseslint.config(
             '*.mjs',
             '*.ts',
             'scripts/*.mjs',
+            'scripts/*.d.mts',
             'infrastructure/scripts/*.d.mts',
             'infrastructure/scripts/lib/*.d.mts',
           ],

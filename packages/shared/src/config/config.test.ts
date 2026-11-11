@@ -168,6 +168,31 @@ describe('application configuration', () => {
     ]);
   });
 
+  it.each([
+    'https://localhost',
+    'https://127.0.0.1:8443',
+    'https://169.254.169.254',
+    'https://[::1]',
+    'https://2130706433',
+  ])('refuses %s as a service URL in production', (url) => {
+    const local = { ...validEnv, MOODLE_BASE_URL: url };
+    expect(loadConfig(applicationConfigSchema, local).MOODLE_BASE_URL).toBe(url);
+    const error = expectIssues(() =>
+      loadConfig(applicationConfigSchema, { ...local, NODE_ENV: 'production' }),
+    );
+    expect(error.issues).toEqual([
+      {
+        variable: 'MOODLE_BASE_URL',
+        message: 'Must not be a loopback, link-local or metadata address in production.',
+      },
+    ]);
+  });
+
+  it('allows an internal-network Moodle in production', () => {
+    const internal = { ...validEnv, NODE_ENV: 'production', MOODLE_BASE_URL: 'https://10.20.0.5' };
+    expect(loadConfig(applicationConfigSchema, internal).MOODLE_BASE_URL).toBe('https://10.20.0.5');
+  });
+
   it('enforces the production https rule in feature schemas too', () => {
     const error = expectIssues(() =>
       loadConfig(moodleConfigSchema, {

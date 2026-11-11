@@ -478,6 +478,8 @@ describe('administration page delivery', () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain('unsafe-inline');
     expect(page.headers.get('x-frame-options')).toBe('DENY');
+    expect(page.headers.get('strict-transport-security')).toMatch(/^max-age=\d{8,}/);
+    expect(page.headers.get('cross-origin-resource-policy')).toBe('same-origin');
     const html = await page.text();
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/);
     expect(html).not.toMatch(/\son[a-z]+=/i);

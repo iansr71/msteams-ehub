@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 
 import { getTelemetry, statusClass, type Logger } from '@ehub/shared';
+import { JSON_SECURITY_HEADERS } from '@ehub/shared/answers';
 import type { HttpMethod, HttpRouteHandler, IHttpServerAdapter } from '@microsoft/teams.apps';
 
 /** Teams activities are small; this bounds memory per request. */
@@ -25,11 +26,7 @@ export interface BotReadiness {
   }[];
 }
 
-const JSON_HEADERS = {
-  'content-type': 'application/json; charset=utf-8',
-  'cache-control': 'no-store',
-  'x-content-type-options': 'nosniff',
-} as const;
+const JSON_HEADERS = JSON_SECURITY_HEADERS;
 
 function respond(response: ServerResponse, status: number, body: unknown): void {
   const text = body === undefined ? '' : JSON.stringify(body);

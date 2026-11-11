@@ -20,6 +20,7 @@ import { reportSyncGauges } from '@ehub/indexer';
 
 import { createApiReadiness } from '../health/apiReadiness.js';
 import { startApiServer, type RunningApiServer } from '../http/apiServer.js';
+import { ConcurrencyLimiter, SlidingWindowRateLimiter } from '../http/requestLimits.js';
 import { InterimCourseAccess, type CourseAccessResolver } from '../auth/courseAccess.js';
 import {
   createAuthorizationServices,
@@ -213,6 +214,17 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
                   ? logFeedback
                   : new StoringFeedbackRecorder(admin.stores.usage, logFeedback),
               readiness,
+              limits: {
+                questions: new SlidingWindowRateLimiter({
+                  limit: config.API_RATE_LIMIT_QUESTIONS,
+                  windowMs: config.API_RATE_LIMIT_WINDOW_SECONDS * 1_000,
+                }),
+                feedback: new SlidingWindowRateLimiter({
+                  limit: config.API_RATE_LIMIT_FEEDBACK,
+                  windowMs: config.API_RATE_LIMIT_WINDOW_SECONDS * 1_000,
+                }),
+                concurrency: new ConcurrencyLimiter(config.API_MAX_CONCURRENT_ANSWERS),
+              },
               ...(admin === undefined
                 ? {}
                 : {

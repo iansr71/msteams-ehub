@@ -8,7 +8,7 @@ import type { ContentExtractor } from './types.js';
  */
 export const moodleBookExtractor: ContentExtractor = {
   name: 'moodle-book',
-  version: '1.0.0',
+  version: '1.1.0',
   resourceType: 'moodle-book-chapter',
   supports: ({ contentType, resource }) =>
     contentType === 'html' && resource.role === 'book-chapter',
