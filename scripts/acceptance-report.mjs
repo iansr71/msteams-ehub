@@ -184,7 +184,15 @@ function main() {
   const markdown = renderMarkdown(report);
   writeFileSync(join(outDir, 'acceptance-report.md'), markdown);
   if (writeDocs) {
-    writeFileSync(join(root, 'docs', 'acceptance-report.md'), markdown);
+    const docPath = join(root, 'docs', 'acceptance-report.md');
+    writeFileSync(docPath, markdown);
+    // The committed copy has to satisfy `pnpm format:check`, which wants aligned tables, so
+    // format it here rather than leaving the next gate run to fail on a generated file.
+    spawnSync(
+      process.execPath,
+      [join(root, 'node_modules', 'prettier', 'bin', 'prettier.cjs'), '--write', docPath],
+      { cwd: root, encoding: 'utf8', stdio: 'ignore' },
+    );
   }
 
   for (const suite of suites) {

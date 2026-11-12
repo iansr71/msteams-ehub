@@ -13,6 +13,15 @@ import { USER_A, startAnswerApi, type AnswerApi } from '../security/__fixtures__
 let api: AnswerApi;
 const QUESTION = 'How often should sunscreen be reapplied after a peel?';
 
+/**
+ * Changes the first character of a base64url signature, which always changes the signature
+ * bytes. The last character carries unused trailing bits, so several values there decode to the
+ * same bytes and would leave the token valid.
+ */
+function tamper(signature: string): string {
+  return `${signature.startsWith('A') ? 'B' : 'A'}${signature.slice(1)}`;
+}
+
 beforeAll(async () => {
   api = await startAnswerApi();
   api.modelReplies(modelAnswer());
@@ -44,7 +53,7 @@ describe('12 Entra authentication', () => {
     const [header, payload, signature] = valid.split('.');
     const token =
       kind === 'forged'
-        ? `${header ?? ''}.${payload ?? ''}.${(signature ?? '').replace(/.$/, 'A')}`
+        ? `${header ?? ''}.${payload ?? ''}.${tamper(signature ?? '')}`
         : kind === 'unsigned'
           ? `${header ?? ''}.${payload ?? ''}.`
           : 'not-a-token';

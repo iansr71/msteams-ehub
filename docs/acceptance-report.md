@@ -1,6 +1,6 @@
 # Acceptance test report
 
-Generated 2026-11-12 from commit `61816c07544e` with uncommitted changes, Node.js v22.23.4.
+Generated 2026-11-12 from commit `f2fa92a25a68` with uncommitted changes, Node.js v22.23.4.
 
 **Result: PASS.** 19 of 19 runnable suites passed; 97 tests passed, 0 failed, 0 skipped. 4 suites need a live service and were not run.
 
@@ -15,36 +15,36 @@ Regenerate with `pnpm test:acceptance` (add `-- --write-docs` to update this fil
 
 ## Suites
 
-| ID | Suite | Result | Tests |
-| --- | --- | --- | --- |
-| 01 | Moodle connectivity | pass | 6 passed |
-| 02 | Course discovery | pass | 4 passed |
-| 03 | File downloading | pass | 3 passed |
-| 04 | Content extraction | pass | 4 passed |
-| 05 | Chunking | pass | 3 passed |
-| 06 | Embedding | pass | 3 passed |
-| 07 | Indexing | pass | 3 passed |
-| 08 | Retrieval quality | pass | 5 passed |
-| 09 | Grounded answer quality | pass | 10 passed |
-| 10 | Citation accuracy | pass | 5 passed |
-| 11 | Teams rendering | pass | 6 passed |
-| 12 | Entra authentication | pass | 9 passed |
-| 13 | Moodle course authorization | pass | 7 passed |
-| 14 | Prompt injection | pass | 6 passed |
-| 15 | Deleted-content cleanup | pass | 5 passed |
-| 16 | Incremental synchronization | pass | 5 passed |
-| 17 | Failure recovery | pass | 6 passed |
-| 18 | Monitoring and redaction | pass | 6 passed |
-| 19 | Content update, end to end | pass | 1 passed |
+| ID  | Suite                       | Result | Tests     |
+| --- | --------------------------- | ------ | --------- |
+| 01  | Moodle connectivity         | pass   | 6 passed  |
+| 02  | Course discovery            | pass   | 4 passed  |
+| 03  | File downloading            | pass   | 3 passed  |
+| 04  | Content extraction          | pass   | 4 passed  |
+| 05  | Chunking                    | pass   | 3 passed  |
+| 06  | Embedding                   | pass   | 3 passed  |
+| 07  | Indexing                    | pass   | 3 passed  |
+| 08  | Retrieval quality           | pass   | 5 passed  |
+| 09  | Grounded answer quality     | pass   | 10 passed |
+| 10  | Citation accuracy           | pass   | 5 passed  |
+| 11  | Teams rendering             | pass   | 6 passed  |
+| 12  | Entra authentication        | pass   | 9 passed  |
+| 13  | Moodle course authorization | pass   | 7 passed  |
+| 14  | Prompt injection            | pass   | 6 passed  |
+| 15  | Deleted-content cleanup     | pass   | 5 passed  |
+| 16  | Incremental synchronization | pass   | 5 passed  |
+| 17  | Failure recovery            | pass   | 6 passed  |
+| 18  | Monitoring and redaction    | pass   | 6 passed  |
+| 19  | Content update, end to end  | pass   | 1 passed  |
 
 ## Checks that need a live service
 
-| ID | Check | Needs | How to run |
-| --- | --- | --- | --- |
-| E1 | Live Moodle reachability | moodle | `pnpm diagnose` |
-| E2 | Live Azure Search and model | azure | `pnpm diagnose` |
-| E3 | Live retrieval and answer evaluation | azure | `pnpm evaluation:full` |
-| E4 | Teams and Entra sign-in | teams | `manual: see docs/acceptance.md, "Checks that need a deployment"` |
+| ID  | Check                                | Needs  | How to run                                                        |
+| --- | ------------------------------------ | ------ | ----------------------------------------------------------------- |
+| E1  | Live Moodle reachability             | moodle | `pnpm diagnose`                                                   |
+| E2  | Live Azure Search and model          | azure  | `pnpm diagnose`                                                   |
+| E3  | Live retrieval and answer evaluation | azure  | `pnpm evaluation:full`                                            |
+| E4  | Teams and Entra sign-in              | teams  | `manual: see docs/acceptance.md, "Checks that need a deployment"` |
 
 ## What each suite proves
 
