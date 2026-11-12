@@ -414,3 +414,43 @@ makes the suite incomplete, which fails the run. The catalogue is also tested ag
 directory, so a new `tests/acceptance/NN-*.test.ts` that nobody listed fails rather than going
 unreported. Suites needing a live Moodle, Azure or Teams are reported as not-run with the
 command to run them, and never affect the exit code.
+
+## Production readiness is checked by scope, not all-or-nothing (phase 20)
+
+`checkProductionReadiness` takes a scope. `deployment` is the whole rollout and includes the
+secrets, because `pnpm preflight` runs where the deployed values are. `apiService` is the subset
+the answer API itself must get right, and it is what `serve` enforces at start-up: the API does
+not need the Teams manifest inputs or the indexer's course selection, so demanding them would
+stop a correct API from starting. `release` is what can be checked before a deployment exists,
+from an operator's machine, and deliberately excludes secrets — requiring them would mean copying
+the Moodle token out of Key Vault into a file to satisfy a check, which is worse than not
+checking it there. One scope per question, instead of one check that is wrong for two of them.
+
+## Key Vault access is proven by implication, not by a probe (phase 20)
+
+The deployed services never call Key Vault: Container Apps resolves each secret reference with
+the app's user-assigned managed identity and passes the value in the environment. So there is no
+Key Vault client to health-check, and adding one would create a dependency that production does
+not otherwise have. The preflight instead reports a missing or placeholder secret as a
+configuration failure that names the variable and points at the reference, the identity and the
+vault access; vault access itself is verified at deployment time by `deploy.sh`, which refuses to
+deploy the services while a secret is absent.
+
+## A gate that could not run holds the release (phase 20)
+
+`pnpm release:verify` reports three outcomes, not two: `pass`, `fail` and `blocked`. A blocked
+step — no manifest variables, no release configuration — holds the release exactly as a failure
+does, and the report lists it under the manual checks. The alternative, treating "we could not
+check" as "nothing wrong", is how a release gets called ready on the strength of checks nobody
+ran. Bicep validation is the one exception, because Prompt 20 asks for it only where the tooling
+is installed: a missing CLI is a skip, and a skip is named in the report but does not hold the
+release.
+
+## The configuration reference is generated (phase 20)
+
+There are over 120 settings. A hand-written table of them would be wrong within a release, and
+wrong in the quiet way that costs an afternoon of an incident. `pnpm config:reference` generates
+the variable tables in docs/configuration-reference.md from the Zod schemas, and
+`--check` fails when the committed file is out of date, so the reference cannot drift from what
+the code accepts. The prose around the generated block, which is where the judgement lives, is
+written by hand.

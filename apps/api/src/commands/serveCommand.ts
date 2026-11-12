@@ -3,11 +3,13 @@ import {
   EXIT_OK,
   adminConfigSchema,
   apiServerConfigSchema,
+  checkProductionReadiness,
   cleanEnvironment,
   entraAuthConfigSchema,
   loadConfig,
   parseCommandArgs,
   readPackageVersion,
+  renderReadinessText,
   sanitizeText,
   type CommandDefinition,
   type EnvironmentSource,
@@ -120,6 +122,22 @@ export function createServeCommand(dependencies: ServeCommandDependencies): Comm
           ) {
             context.stdout(PRODUCTION_REQUIREMENTS_MESSAGE);
             return EXIT_FAILURE;
+          }
+          // Production startup validation (docs/production-deployment.md): the settings this
+          // process must get right, checked before it serves anything. The whole-deployment
+          // gate is `pnpm preflight`, which also contacts every dependency.
+          if (cleanEnvironment(dependencies.env)['NODE_ENV'] === 'production') {
+            const readiness = checkProductionReadiness(dependencies.env, { scope: 'apiService' });
+            if (readiness.status === 'fail') {
+              context.logger.error('Refusing to start: production configuration is not valid.', {
+                findings: readiness.findings.map((finding) => ({
+                  id: finding.id,
+                  variables: finding.variables,
+                })),
+              });
+              context.stdout(renderReadinessText(readiness));
+              return EXIT_FAILURE;
+            }
           }
           const config = loadConfig(apiServerConfigSchema, dependencies.env);
           const entra = entraConfigured(dependencies.env)

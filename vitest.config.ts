@@ -43,6 +43,14 @@ export default defineConfig({
       {
         ...shared,
         test: {
+          name: 'scripts',
+          environment: 'node',
+          include: ['tests/scripts/**/*.test.ts'],
+        },
+      },
+      {
+        ...shared,
+        test: {
           name: 'security',
           environment: 'node',
           include: ['tests/security/**/*.test.ts'],

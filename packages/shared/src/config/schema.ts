@@ -127,6 +127,19 @@ export const moodleConfigShape = {
     MOODLE_DEFAULTS.maxDownloadBytes,
   ),
   MOODLE_MAX_RETRIES: boundedInteger(0, 10, MOODLE_DEFAULTS.maxRetries),
+  /**
+   * The day the Moodle web-service token stops working (YYYY-MM-DD), copied from Moodle when the
+   * token is issued. Nothing reads the token's expiry over the API, so recording it here is what
+   * lets `preflight` warn before staff questions start failing (docs/token-rotation.md).
+   */
+  MOODLE_TOKEN_EXPIRES_ON: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Must be a date as YYYY-MM-DD.' })
+    .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), {
+      message: 'Must be a real calendar date.',
+    })
+    .optional(),
 };
 
 export const SEARCH_DEFAULTS = {

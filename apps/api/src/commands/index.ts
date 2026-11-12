@@ -4,6 +4,7 @@ import { createAnswerEvaluationCommand } from './answerEvaluationCommand.js';
 import { createAskCommand, type AskCommandDependencies } from './askCommand.js';
 import { createDiagnoseCommand, type DiagnoseDependencies } from './diagnoseCommand.js';
 import { createHealthCommand } from './health.js';
+import { createPreflightCommand, type PreflightDependencies } from './preflightCommand.js';
 import { createServeCommand, type ServeCommandDependencies } from './serveCommand.js';
 import {
   createRetrievalEvaluationCommand,
@@ -17,6 +18,7 @@ export interface ApiCommandDependencies {
   readonly ask?: AskCommandDependencies;
   readonly serve?: ServeCommandDependencies;
   readonly diagnose?: DiagnoseDependencies;
+  readonly preflight?: PreflightDependencies;
 }
 
 export function createApiCommands(
@@ -30,6 +32,9 @@ export function createApiCommands(
     ask: createAskCommand(dependencies.ask ?? retrieval),
     serve: createServeCommand(dependencies.serve ?? dependencies.ask ?? retrieval),
     diagnose: createDiagnoseCommand(dependencies.diagnose ?? dependencies.ask ?? retrieval),
+    preflight: createPreflightCommand(
+      dependencies.preflight ?? dependencies.diagnose ?? dependencies.ask ?? retrieval,
+    ),
   };
 }
 

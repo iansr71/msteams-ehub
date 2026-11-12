@@ -20,6 +20,13 @@ user's Moodle course enrolments.
 >
 > Testing: docs/acceptance.md (the acceptance suites, how answers are scored, and what grounding
 > does not prove) and docs/acceptance-report.md (`pnpm test:acceptance`).
+>
+> Production: docs/production-deployment.md (the deployment checklist and the pilot
+> controls), docs/operations-runbook.md (the day-to-day procedures),
+> docs/incident-response.md, docs/support-troubleshooting.md, docs/rollback.md,
+> docs/backup-and-recovery.md, docs/token-rotation.md, docs/change-management.md,
+> docs/acceptance-signoff.md, docs/configuration-reference.md,
+> docs/moodle-production-setup.md and docs/teams-deployment.md.
 
 ## Repository layout
 
@@ -76,6 +83,7 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm test:integration`                                          | Integration tests in `tests/integration`                                                                                                         |
 | `pnpm test:security`                                             | Security regression tests in `tests/security`                                                                                                    |
 | `pnpm test:acceptance`                                           | Acceptance suites in `tests/acceptance`, reported per suite (docs/acceptance.md)                                                                 |
+| `pnpm release:verify`                                            | Release readiness: every gate, then `reports/release/release-report.md`                                                                          |
 | `pnpm api health`                                                | API configuration health report (JSON)                                                                                                           |
 | `pnpm indexer health`                                            | Indexer configuration health report (JSON)                                                                                                       |
 | `pnpm indexer moodle:ping`                                       | Checks the Moodle connection and that the service exposes exactly the expected functions                                                         |
@@ -102,6 +110,9 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm infra:validate`                                            | Lint and build the Bicep templates and parameter files; skipped when no Bicep CLI is installed (docs/infrastructure.md)                          |
 | `pnpm test:security`                                             | Run the security tests and report pass or fail per control; exit 1 if any control fails or was skipped (docs/security.md)                        |
 | `pnpm test:acceptance`                                           | Run the acceptance suites and report pass or fail per suite; exit 1 if any runnable suite fails or was skipped (docs/acceptance.md)              |
+| `pnpm release:verify`                                            | Every gate this repository can run, then the release report; a gate that could not run holds the release (docs/production-deployment.md)         |
+| `pnpm preflight`                                                 | Production startup validation in a deployed environment: configuration, pilot controls, live dependencies, index schema; `--static`, `--scope`   |
+| `pnpm config:reference`                                          | Regenerate the variable tables in docs/configuration-reference.md from the schemas; `--check` fails if they are out of date                      |
 | `pnpm evaluation:retrieval`                                      | Scores `tests/evaluation/retrieval-cases.json` against a deployed index                                                                          |
 | `pnpm evaluation:answers`                                        | Scores `tests/evaluation/answer-cases.json` against the deployed index and model                                                                 |
 | `pnpm evaluation:full`                                           | Retrieval then answer evaluation, against a deployment                                                                                           |
