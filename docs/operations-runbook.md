@@ -234,9 +234,14 @@ this; only a person reading the source can.
 Every answer card shows `Reference: <correlation ID>`. Ask the person for it; it is the thread
 from the card back through the bot, the API, retrieval and the model.
 
-1. In the administration area, find the answer outcome for that correlation ID: status, course
-   IDs, source and citation counts, model, duration (docs/admin.md).
-2. In Application Insights, the same ID appears on every log record and span for that question:
+1. In the administration area, find the answer outcome for that correlation ID. It holds the
+   time, the status (`answered`, `insufficient_evidence` or `failed`) and the correlation ID, and
+   nothing else: not the question, not the answer, not the courses. So this step tells you which
+   of the three happened, and the rest comes from the logs below (docs/admin.md).
+2. In Application Insights, the same ID appears on every log record and span for that question.
+   The API's own "Question answered." line carries the counts — status, sources, claims,
+   citations, removed claims, how many courses were in scope, the question's length in characters
+   and the duration — without any of the text:
 
 ```kusto
 union traces, requests, dependencies, exceptions
