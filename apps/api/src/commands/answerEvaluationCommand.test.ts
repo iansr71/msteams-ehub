@@ -13,6 +13,7 @@ import {
 } from '../rag/__fixtures__/scriptedChatModel.js';
 import { INSUFFICIENT_EVIDENCE_MESSAGE } from '../rag/answerSchema.js';
 import { AnswerEvaluationRunner, type Answerer } from '../rag/answerEvaluationRunner.js';
+import { fixtureSource } from '../rag/__fixtures__/ragAnswers.js';
 import type { RagAnswer } from '../rag/ragService.js';
 import {
   API_KEY,
@@ -131,7 +132,9 @@ describe('pnpm evaluation answers', () => {
     ]);
     const result = await run(['--file', 'u.json'], [modelAnswer()], { '/work/u.json': cases });
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain('FAIL unanswerable answered (expected_insufficient_evidence)');
+    expect(result.stdout).toContain(
+      'FAIL/expectation unanswerable answered (expected_insufficient_evidence)',
+    );
   });
 });
 
@@ -215,7 +218,8 @@ describe('AnswerEvaluationRunner source assertion', () => {
       excerpt: 'e',
     };
     const report = await new AnswerEvaluationRunner({
-      answerer: answerer({ ...base, citations: [citation] }),
+      // With the matching source, so only the authorisation rules are under test here.
+      answerer: answerer({ ...base, citations: [citation], sources: [fixtureSource(citation)] }),
       tenantId: TENANT_ID,
     }).run([testCase]);
     expect(report.cases[0]?.failures).toEqual([

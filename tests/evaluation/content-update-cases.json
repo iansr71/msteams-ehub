@@ -1,0 +1,13 @@
+[
+  {
+    "id": "update-sunscreen-interval",
+    "courseId": 12,
+    "moduleId": 701,
+    "question": "How often should sunscreen be reapplied after a peel?",
+    "before": ["Reapply broad-spectrum sunscreen every two hours after a peel."],
+    "after": ["Reapply broad-spectrum sunscreen every ninety minutes after a peel."],
+    "beforeFacts": ["every two hours"],
+    "afterFacts": ["every ninety minutes"],
+    "notes": "TEMPLATE: a real procedure change is the best case here. The suite proves the old wording stops being answered after a re-sync."
+  }
+]

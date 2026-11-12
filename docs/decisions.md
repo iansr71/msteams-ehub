@@ -387,3 +387,30 @@ another origin would add an explicit allowlist.
 passed. A skipped test (the Bicep or PowerShell checks, when those tools are missing) makes the
 control incomplete, which fails the run. A report that says "pass" for a check that never ran
 would be worse than one that fails and says why.
+
+## Acceptance suites answer through a quoting model, not a scripted one (phase 18)
+
+The acceptance stack runs the real indexing pipeline and the real answer engine over one fake
+search service, and its chat model answers by quoting the passages the prompt gave it. A model
+with hand-written replies would test the engine against text chosen to pass; quoting makes an
+answer a window onto the index, so a content change shows as an answer change and a removed
+passage cannot be quoted. The cost is that nothing here predicts how a real model phrases an
+answer, which is what `pnpm evaluation:full` measures against a deployment.
+
+## Grounding is mechanical, and suite 09 says so in a test (phase 18)
+
+`ClaimSupportValidator` catches claims with no valid citation, invented pages, slides, documents
+and links, numbers that appear in no source, and claims with no overlap with the passage they
+cite. It does not judge meaning: a claim that cites a real passage and reuses its words can
+contradict it and still pass. Suite 09 records that limitation as a test rather than a sentence
+in a document, so it cannot be mistaken for a check that exists. Reading answers against the
+source stays a pilot activity.
+
+## A skipped acceptance suite fails the acceptance report (phase 18)
+
+As with the security report, a suite passes only when every file listed in
+`tests/acceptance/suites.json` produced results and every test in it passed; a skipped test
+makes the suite incomplete, which fails the run. The catalogue is also tested against the
+directory, so a new `tests/acceptance/NN-*.test.ts` that nobody listed fails rather than going
+unreported. Suites needing a live Moodle, Azure or Teams are reported as not-run with the
+command to run them, and never affect the exit code.

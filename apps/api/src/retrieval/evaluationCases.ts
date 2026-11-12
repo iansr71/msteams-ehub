@@ -17,6 +17,29 @@ const courseId = z
 
 const resourceId = z.string().trim().min(1).max(1100);
 
+const phrase = z.string().trim().min(2).max(300);
+
+/**
+ * A fact to look for in an answer: one phrase, or `{ "anyOf": [...] }` for alternative
+ * wordings. Normalised to the `anyOf` form so scoring has one shape to handle.
+ */
+const factMatcher = z
+  .union([phrase, z.strictObject({ anyOf: z.array(phrase).min(1).max(10) })])
+  .transform((value) => (typeof value === 'string' ? { anyOf: [value] } : value));
+
+export type FactMatcher = z.output<typeof factMatcher>;
+
+/** NFC, lower case, collapsed whitespace: enough to survive reformatting, nothing cleverer. */
+export function normalizeForMatching(text: string): string {
+  return text.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** True when any of the matcher's phrasings appears in `text`. Deterministic, no model. */
+export function factMatches(matcher: FactMatcher, text: string): boolean {
+  const haystack = normalizeForMatching(text);
+  return matcher.anyOf.some((candidate) => haystack.includes(normalizeForMatching(candidate)));
+}
+
 export const evaluationCaseSchema = z
   .strictObject({
     id: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, {
@@ -36,6 +59,18 @@ export const evaluationCaseSchema = z
     resourceTypes: z.array(z.enum(SEARCH_RESOURCE_TYPES)).min(1).optional(),
     /** Answer evaluation: the case passes only if the answer is the insufficient-evidence response. */
     expectInsufficientEvidence: z.boolean().default(false),
+    /**
+     * Answer evaluation: phrases that must appear in the answer, and phrases that must not.
+     * Matching is deterministic (see `factMatches`): no model judges correctness. Give
+     * alternatives with `{ "anyOf": [...] }` when the wording may differ.
+     */
+    requiredFacts: z.array(factMatcher).max(50).default([]),
+    forbiddenFacts: z.array(factMatcher).max(50).default([]),
+    /**
+     * Answer evaluation: whether the answer must report disagreeing passages. `true` requires
+     * it, `false` requires its absence, omitted does not check.
+     */
+    expectConflictingSources: z.boolean().optional(),
     /** Free text for the people maintaining the file; never used in scoring. */
     notes: z.string().max(1000).optional(),
   })
@@ -56,6 +91,26 @@ export const evaluationCaseSchema = z
           code: 'custom',
           path: ['courseIds', index],
           message: 'is not in authorizedCourseIds.',
+        });
+      }
+    });
+    if (testCase.expectInsufficientEvidence && testCase.requiredFacts.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['requiredFacts'],
+        message:
+          'cannot be checked when expectInsufficientEvidence is true: that answer is a fixed message.',
+      });
+    }
+    const requiredPhrases = new Set(
+      testCase.requiredFacts.flatMap((fact) => fact.anyOf.map(normalizeForMatching)),
+    );
+    testCase.forbiddenFacts.forEach((fact, index) => {
+      if (fact.anyOf.some((candidate) => requiredPhrases.has(normalizeForMatching(candidate)))) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['forbiddenFacts', index],
+          message: 'is also listed as required, so the case can never pass.',
         });
       }
     });

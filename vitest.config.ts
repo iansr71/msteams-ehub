@@ -34,6 +34,15 @@ export default defineConfig({
       {
         ...shared,
         test: {
+          name: 'acceptance',
+          environment: 'node',
+          include: ['tests/acceptance/**/*.test.ts'],
+          testTimeout: 30_000,
+        },
+      },
+      {
+        ...shared,
+        test: {
           name: 'security',
           environment: 'node',
           include: ['tests/security/**/*.test.ts'],

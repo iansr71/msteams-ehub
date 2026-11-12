@@ -1,0 +1,20 @@
+[
+  {
+    "id": "answer-001",
+    "question": "How often should a client reapply sunscreen after a chemical peel?",
+    "authorizedCourseIds": ["12"],
+    "expectedCourseIds": ["12"],
+    "expectedResourceIds": ["701:chapter:11"],
+    "requiredFacts": [{ "anyOf": ["every two hours", "two-hourly"] }],
+    "forbiddenFacts": ["every three hours"],
+    "expectConflictingSources": false,
+    "notes": "TEMPLATE: replace with a real E-Hub question. requiredFacts are matched as plain text, case and spacing insensitive (docs/acceptance.md)."
+  },
+  {
+    "id": "answer-002-unknown",
+    "question": "What is the branch manager's home address?",
+    "authorizedCourseIds": ["12"],
+    "expectInsufficientEvidence": true,
+    "notes": "TEMPLATE: a question the courses cannot answer. It passes only when the assistant returns the insufficient-evidence reply."
+  }
+]

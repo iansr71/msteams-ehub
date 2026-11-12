@@ -22,8 +22,24 @@ import type { SyncServices, SyncSettings } from '../syncContext.js';
 
 export const TENANT_ID = '00000000-0000-4000-8000-0000000000aa';
 export const INDEX = 'ehub-course-content-v1';
-const SEARCH_KEY = 'sync-test-search-key-0123456789abcdef';
-const OPENAI_KEY = 'sync-test-openai-key-0123456789abcdef';
+/**
+ * The fake Azure services this harness runs against. Exported so a test can build the answer
+ * side (search client, query embedder) against the very same fakes and index, which is what
+ * makes an end-to-end content test possible (tests/acceptance/framework/endToEnd.ts).
+ */
+export const HARNESS_AZURE = {
+  searchEndpoint: 'https://search.example.test',
+  searchKey: 'sync-test-search-key-0123456789abcdef',
+  indexName: INDEX,
+  dimensions: 8,
+  openAiEndpoint: 'https://openai.example.test',
+  openAiKey: 'sync-test-openai-key-0123456789abcdef',
+  embeddingDeployment: 'embed',
+  embeddingModel: 'text-embedding-3-small',
+} as const;
+
+const SEARCH_KEY = HARNESS_AZURE.searchKey;
+const OPENAI_KEY = HARNESS_AZURE.openAiKey;
 const HOST = 'https://ehub.example.test';
 
 type Raw = Record<string, unknown>;
@@ -286,7 +302,10 @@ export interface Harness {
 export async function createHarness(): Promise<Harness> {
   const site = new FakeMoodleSite();
   const search = new FakeSearchService({ apiKey: SEARCH_KEY });
-  const embeddings = new FakeEmbeddingService({ apiKey: OPENAI_KEY, dimensions: 8 });
+  const embeddings = new FakeEmbeddingService({
+    apiKey: OPENAI_KEY,
+    dimensions: HARNESS_AZURE.dimensions,
+  });
   let now = Date.parse('2026-03-02T06:00:00.000Z');
   const clock = { now: () => new Date(now), advance: (ms: number) => (now += ms) };
   const state = new InMemorySyncStateRepository({ clock });
@@ -297,9 +316,9 @@ export async function createHarness(): Promise<Harness> {
     sink: { write: (line) => logs.push(line) },
   });
   const searchClient = new RestSearchIndexClient({
-    endpoint: 'https://search.example.test',
-    indexName: INDEX,
-    vectorDimensions: 8,
+    endpoint: HARNESS_AZURE.searchEndpoint,
+    indexName: HARNESS_AZURE.indexName,
+    vectorDimensions: HARNESS_AZURE.dimensions,
     semanticEnabled: true,
     authenticator: apiKeyAuthenticator(SEARCH_KEY),
     fetch: search.fetch,
@@ -337,11 +356,11 @@ export async function createHarness(): Promise<Harness> {
         ),
       });
       const embedder = new AzureOpenAIEmbeddingProvider({
-        endpoint: 'https://openai.example.test',
-        deployment: 'embed',
-        modelIdentifier: 'text-embedding-3-small',
+        endpoint: HARNESS_AZURE.openAiEndpoint,
+        deployment: HARNESS_AZURE.embeddingDeployment,
+        modelIdentifier: HARNESS_AZURE.embeddingModel,
         embeddingVersion: overrides.embeddingVersion ?? '1',
-        dimensions: 8,
+        dimensions: HARNESS_AZURE.dimensions,
         sendDimensions: false,
         authenticator: apiKeyAuthenticator(OPENAI_KEY),
         batchSize: 16,

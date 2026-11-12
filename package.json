@@ -20,10 +20,14 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:security": "node scripts/security-report.mjs",
+    "test:acceptance": "node scripts/acceptance-report.mjs",
     "api": "pnpm --silent --filter @ehub/api run cli",
     "diagnose": "pnpm --silent --filter @ehub/api run cli diagnose",
     "indexer": "pnpm --silent --filter @ehub/indexer run cli",
     "evaluation": "pnpm --silent --filter @ehub/api run evaluation",
+    "evaluation:retrieval": "pnpm --silent evaluation retrieval --file tests/evaluation/retrieval-cases.json",
+    "evaluation:answers": "pnpm --silent evaluation answers --file tests/evaluation/answer-cases.json",
+    "evaluation:full": "pnpm evaluation:retrieval && pnpm evaluation:answers",
     "identity": "pnpm --silent --filter @ehub/api run identity",
     "authorization": "pnpm --silent --filter @ehub/api run authorization",
     "teams:validate": "pnpm --silent --filter @ehub/teams-app run manifest validate",
@@ -44,6 +48,7 @@
     "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vitest": "^4.1.12"
+    "vitest": "^4.1.12",
+    "zod": "^4.6.7"
   }
 }

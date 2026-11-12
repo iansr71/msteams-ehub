@@ -1,0 +1,170 @@
+{
+  "description": "The acceptance suites and the tests that make up each one. `pnpm test:acceptance` runs them and reports pass or fail per suite (scripts/acceptance-report.mjs). A suite passes only when every listed file ran and every test in it passed; a skipped test makes the suite incomplete, which the report treats as a failure. `requires` says which live service a suite needs: `none` means it runs anywhere, and the other values mark the checks that only a deployed environment can make (reported, not run).",
+  "suites": [
+    {
+      "id": "01",
+      "name": "Moodle connectivity",
+      "requires": "none",
+      "proves": "The client reaches a Moodle web-service endpoint, keeps the token out of URLs, classifies rejected tokens and throttling, and refuses undocumented response shapes.",
+      "files": ["tests/acceptance/01-moodle-connectivity.test.ts"]
+    },
+    {
+      "id": "02",
+      "name": "Course discovery",
+      "requires": "none",
+      "proves": "Only selected, visible courses and activities are discovered, and hidden or unavailable material is excluded.",
+      "files": ["tests/acceptance/02-course-discovery.test.ts"]
+    },
+    {
+      "id": "03",
+      "name": "File downloading",
+      "requires": "none",
+      "proves": "Activity files are fetched from the token-authenticated pluginfile endpoint within the size limit.",
+      "files": ["tests/acceptance/03-file-downloading.test.ts"]
+    },
+    {
+      "id": "04",
+      "name": "Content extraction",
+      "requires": "none",
+      "proves": "Supported formats yield text with page or slide numbers; unsupported and unreadable files are quarantined rather than indexed empty.",
+      "files": ["tests/acceptance/04-content-extraction.test.ts"]
+    },
+    {
+      "id": "05",
+      "name": "Chunking",
+      "requires": "none",
+      "proves": "Chunks respect the target size, carry heading paths and page or slide metadata, and are numbered within the resource.",
+      "files": ["tests/acceptance/05-chunking.test.ts"]
+    },
+    {
+      "id": "06",
+      "name": "Embedding",
+      "requires": "none",
+      "proves": "Chunks are embedded in batches at the configured dimensions, cached by content hash, and re-embedded when the model or version changes.",
+      "files": ["tests/acceptance/06-embedding.test.ts"]
+    },
+    {
+      "id": "07",
+      "name": "Indexing",
+      "requires": "none",
+      "proves": "Chunks reach the index with their Moodle metadata, and a resource's surplus chunks are removed when it shrinks.",
+      "files": ["tests/acceptance/07-indexing.test.ts"]
+    },
+    {
+      "id": "08",
+      "name": "Retrieval quality",
+      "requires": "none",
+      "proves": "Indexed content is retrievable for the question that it answers, and retrieval never crosses a course boundary. Ranking against real E-Hub content is measured by `pnpm evaluation:retrieval` against a deployment.",
+      "files": ["tests/acceptance/08-retrieval-quality.test.ts"]
+    },
+    {
+      "id": "09",
+      "name": "Grounded answer quality",
+      "requires": "none",
+      "proves": "Claims without support are removed, invented numbers, pages, documents and links are rejected, and an unanswerable question gets the fixed insufficient-evidence reply. See docs/acceptance.md for what grounding does not prove.",
+      "files": ["tests/acceptance/09-grounded-answer-quality.test.ts"]
+    },
+    {
+      "id": "10",
+      "name": "Citation accuracy",
+      "requires": "none",
+      "proves": "Every citation maps to a retrieved chunk and carries the real course, section, resource, page or slide and URL.",
+      "files": ["tests/acceptance/10-citation-accuracy.test.ts"]
+    },
+    {
+      "id": "11",
+      "name": "Teams rendering",
+      "requires": "none",
+      "proves": "Answer, welcome and error cards are valid Adaptive Cards, and hostile text cannot become a link, action or template expression.",
+      "files": ["tests/acceptance/11-teams-rendering.test.ts"]
+    },
+    {
+      "id": "12",
+      "name": "Entra authentication",
+      "requires": "none",
+      "proves": "Only tokens with the expected issuer, audience, signature, lifetime and tenant are accepted, and failure is closed.",
+      "files": ["tests/acceptance/12-entra-authentication.test.ts"]
+    },
+    {
+      "id": "13",
+      "name": "Moodle course authorization",
+      "requires": "none",
+      "proves": "Retrieval is limited to the signed-in user's Moodle enrolments for every case in tests/evaluation/authorization-cases.json, and an unavailable Moodle fails closed.",
+      "files": ["tests/acceptance/13-moodle-course-authorization.test.ts"]
+    },
+    {
+      "id": "14",
+      "name": "Prompt injection",
+      "requires": "none",
+      "proves": "The attacks in tests/evaluation/security-cases.json cannot change the assistant's instructions, widen access or leak credentials.",
+      "files": ["tests/acceptance/14-prompt-injection.test.ts"]
+    },
+    {
+      "id": "15",
+      "name": "Deleted-content cleanup",
+      "requires": "none",
+      "proves": "Deleted, hidden and deselected content stops being answerable, while the deletion guard prevents an outage from emptying the index.",
+      "files": ["tests/acceptance/15-deleted-content-cleanup.test.ts"]
+    },
+    {
+      "id": "16",
+      "name": "Incremental synchronization",
+      "requires": "none",
+      "proves": "Unchanged content is skipped without embedding cost, changed and new content is picked up, and a pipeline version change forces a re-index.",
+      "files": ["tests/acceptance/16-incremental-synchronization.test.ts"]
+    },
+    {
+      "id": "17",
+      "name": "Failure recovery",
+      "requires": "none",
+      "proves": "Moodle, index and lease failures leave the last good answers in place and recover without operator surgery.",
+      "files": ["tests/acceptance/17-failure-recovery.test.ts"]
+    },
+    {
+      "id": "18",
+      "name": "Monitoring and redaction",
+      "requires": "none",
+      "proves": "Jobs and answers emit structured JSON with correlation IDs and counts, carrying no credentials, questions or document text, and sync lag is reported.",
+      "files": ["tests/acceptance/18-monitoring-and-redaction.test.ts"]
+    },
+    {
+      "id": "19",
+      "name": "Content update, end to end",
+      "requires": "none",
+      "proves": "Prompt 18's end-to-end check: index version 1, answer from it, replace the source, re-sync, prove version 1's chunks are gone, and answer from version 2.",
+      "files": ["tests/acceptance/19-content-update-end-to-end.test.ts"]
+    },
+    {
+      "id": "E1",
+      "name": "Live Moodle reachability",
+      "requires": "moodle",
+      "proves": "The configured E-Hub server answers core_webservice_get_site_info with the deployed token, so the web service, the account and the token all work.",
+      "files": [],
+      "command": "pnpm diagnose"
+    },
+    {
+      "id": "E2",
+      "name": "Live Azure Search and model",
+      "requires": "azure",
+      "proves": "The deployed search index, embedding deployment and chat deployment all answer with the deployed identity, and the state stores are reachable.",
+      "files": [],
+      "command": "pnpm diagnose"
+    },
+    {
+      "id": "E3",
+      "name": "Live retrieval and answer evaluation",
+      "requires": "azure",
+      "proves": "Retrieval and answer cases score against the real index and model rather than fakes.",
+      "files": [],
+      "command": "pnpm evaluation:full"
+    },
+    {
+      "id": "E4",
+      "name": "Teams and Entra sign-in",
+      "requires": "teams",
+      "proves": "A staff member can install the personal app, sign in with Entra SSO and get an answer with working citation links.",
+      "files": [],
+      "command": "manual: see docs/acceptance.md, \"Checks that need a deployment\""
+    }
+  ]
+}

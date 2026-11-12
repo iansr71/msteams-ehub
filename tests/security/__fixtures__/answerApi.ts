@@ -61,6 +61,8 @@ export const USER_B = {
 export interface AnswerApi {
   readonly url: string;
   readonly kit: TokenKit;
+  /** The fake Moodle behind authorisation: set enrolments, or switch failures on. */
+  readonly moodle: FakeMoodle;
   /** Sets what the model returns for following questions (a string or a function of the request). */
   modelReplies(reply: string | ((request: ChatCompletionRequest) => string)): void;
   readonly modelRequests: ChatCompletionRequest[];
@@ -196,6 +198,7 @@ export async function startAnswerApi(
     modelReplies: (next) => {
       reply = next;
     },
+    moodle,
     modelRequests,
     logs,
     tokenFor: (user, claims = {}) => kit.sign({ oid: user.oid, email: user.email, ...claims }),

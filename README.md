@@ -17,6 +17,9 @@ user's Moodle course enrolments.
 > rollback and Teams packaging) is in docs/infrastructure.md.
 > Security: docs/security.md (controls and how they are tested), docs/threat-model.md and
 > docs/security-test-report.md (`pnpm test:security`; `pnpm secrets:scan`).
+>
+> Testing: docs/acceptance.md (the acceptance suites, how answers are scored, and what grounding
+> does not prove) and docs/acceptance-report.md (`pnpm test:acceptance`).
 
 ## Repository layout
 
@@ -72,6 +75,7 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm test:unit`                                                 | Unit tests inside `packages/*` and `apps/*`                                                                                                      |
 | `pnpm test:integration`                                          | Integration tests in `tests/integration`                                                                                                         |
 | `pnpm test:security`                                             | Security regression tests in `tests/security`                                                                                                    |
+| `pnpm test:acceptance`                                           | Acceptance suites in `tests/acceptance`, reported per suite (docs/acceptance.md)                                                                 |
 | `pnpm api health`                                                | API configuration health report (JSON)                                                                                                           |
 | `pnpm indexer health`                                            | Indexer configuration health report (JSON)                                                                                                       |
 | `pnpm indexer moodle:ping`                                       | Checks the Moodle connection and that the service exposes exactly the expected functions                                                         |
@@ -97,12 +101,17 @@ read configuration from Azure Key Vault references and app settings; the CLIs ne
 | `pnpm diagnose`                                                  | Configuration plus live checks of Moodle, search, embeddings, chat and state stores; JSON, no secrets; exit 1 on failure (docs/observability.md) |
 | `pnpm infra:validate`                                            | Lint and build the Bicep templates and parameter files; skipped when no Bicep CLI is installed (docs/infrastructure.md)                          |
 | `pnpm test:security`                                             | Run the security tests and report pass or fail per control; exit 1 if any control fails or was skipped (docs/security.md)                        |
+| `pnpm test:acceptance`                                           | Run the acceptance suites and report pass or fail per suite; exit 1 if any runnable suite fails or was skipped (docs/acceptance.md)              |
+| `pnpm evaluation:retrieval`                                      | Scores `tests/evaluation/retrieval-cases.json` against a deployed index                                                                          |
+| `pnpm evaluation:answers`                                        | Scores `tests/evaluation/answer-cases.json` against the deployed index and model                                                                 |
+| `pnpm evaluation:full`                                           | Retrieval then answer evaluation, against a deployment                                                                                           |
 | `pnpm secrets:scan`                                              | Scan tracked and untracked files for committed credentials; reports file and line, never the value                                               |
 
 Validation gate used before every phase is committed:
 
 ```bash
-pnpm install && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+pnpm install && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test \
+  && pnpm test:security && pnpm test:acceptance && pnpm build
 ```
 
 ### Health commands

@@ -378,12 +378,15 @@ describe('Teams → answer API → RAG', () => {
 
     // One correlation ID from the bot's turn to the API's request.
     const [bot, api] = [processes[1], processes[0]];
-    const botLine =
+    const sentLine = (): string =>
       bot?.stderr
         .join('')
         .split('\n')
         .find((line) => line.includes('Answer sent.')) ?? '';
-    const correlationId = (JSON.parse(botLine) as { correlationId: string }).correlationId;
+    // The card is posted before the bot's own log line is flushed, so wait for the line
+    // rather than parsing whatever stderr happens to hold.
+    await waitFor(() => sentLine() !== '');
+    const correlationId = (JSON.parse(sentLine()) as { correlationId: string }).correlationId;
     expect(correlationId).toMatch(/^[0-9a-f-]{36}$/);
     expect(api?.stderr.join('')).toContain(`"correlationId":"${correlationId}"`);
     expect(card).toContain(`Reference: ${correlationId}`);
